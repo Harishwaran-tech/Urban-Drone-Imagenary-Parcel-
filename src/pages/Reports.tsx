@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Card, Button, AIDisclaimer, StatusBadge, PriorityBadge } from '@/components/UI';
+import { apiService } from '@/services/apiService';
 import {
   FileText, Download, FileJson, FileSpreadsheet, FileType,
   CheckCircle2, AlertTriangle, MapPin, GitBranch, Building2, Layers,
@@ -13,6 +14,12 @@ import {
 export default function Reports() {
   const { parcels, activeProject, topologyIssues, gnssPoints, buildings, setCurrentPage } = useApp();
   const [reportGenerated, setReportGenerated] = useState(false);
+
+  const downloadBackendExport = (format: 'shapefile' | 'pdf' | 'dxf') => {
+    const projId = activeProject?.id || 'PRJ-DEMO';
+    const url = apiService.getExportUrl(projId, format);
+    window.open(url, '_blank');
+  };
 
   const stats = useMemo(() => {
     const verified = parcels.filter(p => p.status === 'verified').length;
@@ -200,9 +207,17 @@ export default function Reports() {
                   <Button variant="secondary" className="w-full justify-start" onClick={generateKML}>
                     <Download className="w-4 h-4 text-amber-600" /> Export KML
                   </Button>
-                  <Button variant="secondary" className="w-full justify-start" onClick={() => alert('Shapefile export is a prototype mock action. Use GeoJSON or CSV for actual data download.')}>
-                    <FileType className="w-4 h-4 text-purple-600" /> Export Shapefile
-                    <span className="ml-auto text-[10px] text-slate-400 font-normal">Mock</span>
+                  <Button variant="secondary" className="w-full justify-start" onClick={() => downloadBackendExport('shapefile')}>
+                    <FileType className="w-4 h-4 text-purple-600" /> Export ESRI Shapefile (.zip)
+                    <span className="ml-auto text-[10px] text-emerald-600 font-medium">GIS Ready</span>
+                  </Button>
+                  <Button variant="secondary" className="w-full justify-start" onClick={() => downloadBackendExport('pdf')}>
+                    <FileText className="w-4 h-4 text-rose-600" /> Export Official PDF Report
+                    <span className="ml-auto text-[10px] text-rose-600 font-medium">Survey Grade</span>
+                  </Button>
+                  <Button variant="secondary" className="w-full justify-start" onClick={() => downloadBackendExport('dxf')}>
+                    <Layers className="w-4 h-4 text-indigo-600" /> Export AutoCAD DXF
+                    <span className="ml-auto text-[10px] text-indigo-600 font-medium">CAD Ready</span>
                   </Button>
                 </div>
               </div>

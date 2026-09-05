@@ -23,6 +23,12 @@ import {
   generateNotifications,
   surveyors,
 } from '@/data/mockData';
+import {
+  type MapPresetKey,
+  type BasemapType,
+  type SemanticColorMode,
+  MAP_PRESETS,
+} from '@/utils/mapStyles';
 
 interface AppContextValue {
   // Auth
@@ -52,6 +58,11 @@ interface AppContextValue {
   setAnalysisResult: (result: import('@/services/AIService').AIAnalysisOutput | null) => void;
   isRealAnalysis: boolean;
   setIsRealAnalysis: (v: boolean) => void;
+
+  // Operational Mode (Demo Sandbox vs Live Survey Project)
+  appMode: 'demo' | 'real';
+  setAppMode: (mode: 'demo' | 'real') => void;
+  isDemoMode: boolean;
 
   // Data
   parcels: Parcel[];
@@ -84,6 +95,7 @@ interface AppContextValue {
   unreadCount: number;
 
   // Parcel actions
+  addParcel: (parcel: Parcel) => void;
   updateParcel: (id: string, updates: Partial<Parcel>) => void;
   acceptAIBoundary: (id: string) => void;
   rejectParcel: (id: string) => void;
@@ -101,6 +113,28 @@ interface AppContextValue {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   searchResults: Parcel[];
+
+  // Advanced Unified Map Controls
+  activePreset: import('@/utils/mapStyles').MapPresetKey;
+  applyPreset: (presetKey: import('@/utils/mapStyles').MapPresetKey) => void;
+  basemapType: import('@/utils/mapStyles').BasemapType;
+  setBasemapType: (b: import('@/utils/mapStyles').BasemapType) => void;
+  diffMode: boolean;
+  setDiffMode: (v: boolean) => void;
+  heatmapMode: boolean;
+  setHeatmapMode: (v: boolean) => void;
+  threeDMode: 'survey' | 'analysis' | 'presentation';
+  setThreeDMode: (m: 'survey' | 'analysis' | 'presentation') => void;
+  semanticColorMode: import('@/utils/mapStyles').SemanticColorMode;
+  setSemanticColorMode: (m: import('@/utils/mapStyles').SemanticColorMode) => void;
+  mapCenter: [number, number];
+  setMapCenter: (center: [number, number]) => void;
+  mapZoom: number;
+  setMapZoom: (zoom: number) => void;
+  rasterAdjustments: { brightness: number; contrast: number; saturation: number; sharpen: boolean };
+  setRasterAdjustments: React.Dispatch<React.SetStateAction<{ brightness: number; contrast: number; saturation: number; sharpen: boolean }>>;
+  elevationMode: 'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm';
+  setElevationMode: (m: 'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm') => void;
 }
 
 export interface AppSettings {
@@ -114,7 +148,7 @@ export interface AppSettings {
 }
 
 const defaultLayers: LayerState = {
-  droneOrthomosaic: true,
+  droneOrthomosaic: false,
   satelliteImagery: true,
   streetMap: false,
   aiParcelBoundaries: true,
@@ -123,8 +157,9 @@ const defaultLayers: LayerState = {
   roads: true,
   dsm: false,
   dtm: false,
-  gnssPoints: true,
+  gnssPoints: false,
   conflictAreas: true,
+  lulc: false,
 };
 
 const defaultSettings: AppSettings = {
@@ -154,27 +189,114 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeProjectId, setActiveProjectIdState] = useState<string>('PRJ-001');
   const activeProject = projects.find(p => p.id === activeProjectId) ?? (projects[0] || null);
 
-  const [parcels, setParcels] = useState<Parcel[]>(() => generateParcels('TN-CHN-W42'));
-  const [buildings, setBuildings] = useState<Building[]>(() => generateBuildings(generateParcels('TN-CHN-W42')));
+  // Operational Mode
+  const [appMode, setAppModeState] = useState<'demo' | 'real'>(() => {
+    return (localStorage.getItem('cadastra_app_mode') as 'demo' | 'real') || 'demo';
+  });
+  const isDemoMode = appMode === 'demo';
+
+  const [parcels, setParcels] = useState<Parcel[]>(() =>
+    appMode === 'demo' ? generateParcels('TN-CHN-W42') : []
+  );
+  const [buildings, setBuildings] = useState<Building[]>(() =>
+    appMode === 'demo' ? generateBuildings(generateParcels('TN-CHN-W42')) : []
+  );
   const [roads] = useState<Road[]>(() => generateRoads());
-  const [gnssPoints] = useState<GNSSPoint[]>(() => generateGNSSPoints(generateParcels('TN-CHN-W42')));
-  const [topologyIssues, setTopologyIssues] = useState<TopologyIssue[]>(() => generateTopologyIssues(generateParcels('TN-CHN-W42')));
+  const [gnssPoints] = useState<GNSSPoint[]>(() =>
+    appMode === 'demo' ? generateGNSSPoints(generateParcels('TN-CHN-W42')) : []
+  );
+  const [topologyIssues, setTopologyIssues] = useState<TopologyIssue[]>(() =>
+    appMode === 'demo' ? generateTopologyIssues(generateParcels('TN-CHN-W42')) : []
+  );
   const [notifications, setNotifications] = useState<AppNotification[]>(generateNotifications);
 
   // Uploaded image + analysis state
-  const [uploadedImage, setUploadedImageState] = useState<string | null>('/drone_orthomosaic_ward42.jpg');
+  const [uploadedImage, setUploadedImageState] = useState<string | null>(() =>
+    appMode === 'demo' ? '/drone_orthomosaic_ward42.jpg' : null
+  );
   const [uploadedImageFile, setUploadedImageFile] = useState<File | null>(null);
   const [imageBounds, setImageBounds] = useState<[[number, number], [number, number]] | null>(null);
   const [analysisResult, setAnalysisResultState] = useState<import('@/services/AIService').AIAnalysisOutput | null>(null);
   const [isRealAnalysis, setIsRealAnalysis] = useState(false);
 
-  const [selectedParcelId, setSelectedParcelId] = useState<string | null>('TN-CHN-W42-000184');
+  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(() =>
+    appMode === 'demo' ? 'TN-CHN-W42-000184' : null
+  );
   const [layers, setLayers] = useState<LayerState>(defaultLayers);
   const [orthoOpacity, setOrthoOpacity] = useState<number>(100);
   const [viewMode, setViewMode] = useState<import('@/types').WebGISViewMode>('webgis');
   const [compareSlider, setCompareSlider] = useState(50);
   const [compareMode, setCompareMode] = useState(false);
   const [basemapMode, setBasemapMode] = useState<'satellite' | 'street'>('satellite');
+
+  // Advanced Unified Map Controls
+  const [activePreset, setActivePreset] = useState<MapPresetKey>('survey');
+  const [basemapType, setBasemapType] = useState<BasemapType>('satellite');
+  const [diffMode, setDiffMode] = useState<boolean>(false);
+  const [heatmapMode, setHeatmapMode] = useState<boolean>(false);
+  const [threeDMode, setThreeDMode] = useState<'survey' | 'analysis' | 'presentation'>('survey');
+  const [semanticColorMode, setSemanticColorMode] = useState<SemanticColorMode>('realistic');
+  const [mapCenter, setMapCenter] = useState<[number, number]>(() =>
+    activeProject?.center && Array.isArray(activeProject.center) && activeProject.center.length === 2
+      ? activeProject.center
+      : [13.0827, 80.2707]
+  );
+  const [mapZoom, setMapZoom] = useState<number>(17);
+  const [rasterAdjustments, setRasterAdjustments] = useState({
+    brightness: 100,
+    contrast: 100,
+    saturation: 100,
+    sharpen: false,
+  });
+  const [elevationMode, setElevationMode] = useState<'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm'>('off');
+
+  const applyPreset = useCallback((presetKey: MapPresetKey) => {
+    setActivePreset(presetKey);
+    const preset = MAP_PRESETS[presetKey];
+    if (!preset) return;
+    if (preset.viewMode) {
+      setViewMode(preset.viewMode);
+    }
+    if (preset.diffMode !== undefined) {
+      setDiffMode(preset.diffMode);
+    }
+    if (preset.heatmapMode !== undefined) {
+      setHeatmapMode(preset.heatmapMode);
+    }
+    if (presetKey === 'presentation') {
+      setThreeDMode('presentation');
+    } else if (presetKey === 'survey') {
+      setThreeDMode('survey');
+    }
+    setLayers(prev => ({
+      ...prev,
+      ...preset.layers,
+    }));
+  }, []);
+
+  const setAppMode = useCallback((mode: 'demo' | 'real') => {
+    setAppModeState(mode);
+    localStorage.setItem('cadastra_app_mode', mode);
+    if (mode === 'demo') {
+      const demoP = generateParcels('TN-CHN-W42');
+      setParcels(demoP);
+      setBuildings(generateBuildings(demoP));
+      setUploadedImageState('/drone_orthomosaic_ward42.jpg');
+      setSelectedParcelId('TN-CHN-W42-000184');
+    } else {
+      // Real mode: show only genuine backend analysis if present
+      if (analysisResult && analysisResult.parcels && analysisResult.parcels.length > 0) {
+        setParcels(analysisResult.parcels);
+        setBuildings(analysisResult.buildings);
+        setSelectedParcelId(analysisResult.parcels[0]?.id || null);
+      } else {
+        setParcels([]);
+        setBuildings([]);
+        setSelectedParcelId(null);
+        setUploadedImageState(null);
+      }
+    }
+  }, [analysisResult]);
 
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [searchQuery, setSearchQuery] = useState('');
@@ -348,6 +470,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const addParcel = useCallback((newParcel: Parcel) => {
+    setParcels(prev => [newParcel, ...prev]);
+    setSelectedParcelId(newParcel.id);
+  }, []);
+
   const updateParcel = useCallback((id: string, updates: Partial<Parcel>) => {
     setParcels(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   }, []);
@@ -440,6 +567,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAnalysisResult,
     isRealAnalysis,
     setIsRealAnalysis,
+    appMode,
+    setAppMode,
+    isDemoMode,
     parcels,
     buildings,
     roads,
@@ -464,6 +594,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBasemapMode,
     markNotificationRead,
     unreadCount,
+    addParcel,
     updateParcel,
     acceptAIBoundary,
     rejectParcel,
@@ -477,6 +608,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     searchQuery,
     setSearchQuery,
     searchResults,
+    activePreset,
+    applyPreset,
+    basemapType,
+    setBasemapType,
+    diffMode,
+    setDiffMode,
+    heatmapMode,
+    setHeatmapMode,
+    threeDMode,
+    setThreeDMode,
+    semanticColorMode,
+    setSemanticColorMode,
+    mapCenter,
+    setMapCenter,
+    mapZoom,
+    setMapZoom,
+    rasterAdjustments,
+    setRasterAdjustments,
+    elevationMode,
+    setElevationMode,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

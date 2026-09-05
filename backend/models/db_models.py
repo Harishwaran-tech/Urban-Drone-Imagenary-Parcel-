@@ -23,6 +23,7 @@ class SurveyProject(Base):
     parcels = relationship("Parcel", back_populates="project", cascade="all, delete-orphan")
     features = relationship("DetectedFeature", back_populates="project", cascade="all, delete-orphan")
     conflicts = relationship("Conflict", back_populates="project", cascade="all, delete-orphan")
+    gnss_points = relationship("GNSSControlPoint", back_populates="project", cascade="all, delete-orphan")
 
 
 class SurveyImage(Base):
@@ -50,9 +51,13 @@ class Parcel(Base):
     ward = Column(String(64), default="Ward 01")
     zone = Column(String(64), default="Zone 04")
     
-    # Geometries stored as JSON string for cross-database compatibility (PostGIS geometry can map to this)
+    # Geometries: ai_geometry is immutable (raw AI output); corrected is surveyor edits; current is active
     existing_geometry_json = Column(Text, nullable=False)
     ai_geometry_json = Column(Text, nullable=False)
+    corrected_geometry_json = Column(Text, nullable=True)
+    current_geometry_json = Column(Text, nullable=True)
+    ground_truth_geometry_json = Column(Text, nullable=True)
+    validation_metrics_json = Column(Text, default="{}")
     
     existing_area = Column(Float, default=0.0)
     ai_area = Column(Float, default=0.0)
@@ -62,7 +67,7 @@ class Parcel(Base):
     perimeter = Column(Float, default=0.0)
     boundary_displacement = Column(Float, default=0.0)
     
-    status = Column(String(64), default="ai_preliminary")  # verified, ai_preliminary, requires_review, field_verification, rejected
+    status = Column(String(64), default="ai_preliminary")  # verified, ai_preliminary, requires_review, field_verification, rejected, corrected
     conflict_type = Column(String(64), nullable=True)  # boundary_mismatch, area_mismatch, overlap, gap, self_intersection, missing_parcel, new_structure
     priority = Column(String(32), default="LOW")  # LOW, MEDIUM, HIGH, CRITICAL
     topology_status = Column(String(32), default="valid")  # valid, invalid
@@ -87,6 +92,9 @@ class DetectedFeature(Base):
     confidence = Column(Float, default=0.0)
     area = Column(Float, default=0.0)
     geometry_json = Column(Text, nullable=False)
+    layer_name = Column(String(64), default="features")
+    source_model = Column(String(64), nullable=True)
+    properties_json = Column(Text, default="{}")
     status = Column(String(64), default="pending")  # pending, verified, edited, rejected
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -106,6 +114,25 @@ class Conflict(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     project = relationship("SurveyProject", back_populates="conflicts")
+
+
+class GNSSControlPoint(Base):
+    __tablename__ = "gnss_control_points"
+
+    id = Column(String(64), primary_key=True, index=True)
+    project_id = Column(String(64), ForeignKey("survey_projects.id"), nullable=False)
+    point_id = Column(String(64), nullable=False)  # e.g. GCP-01, CORS-102
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    elevation_m = Column(Float, default=0.0)
+    point_type = Column(String(64), default="CORS_RTK")  # CORS_RTK, DGPS, TOTAL_STATION
+    error_to_boundary_m = Column(Float, nullable=True)
+    nearest_parcel_id = Column(String(64), nullable=True)
+    status = Column(String(32), default="VALIDATED")  # VALIDATED, TOLERANCE_EXCEEDED, PENDING
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    project = relationship("SurveyProject", back_populates="gnss_points")
 
 
 class Verification(Base):

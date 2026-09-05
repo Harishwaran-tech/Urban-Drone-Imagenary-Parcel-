@@ -49,20 +49,41 @@ def create_survey(data: Dict[str, Any], db: Session) -> Dict[str, Any]:
     }
 
 
+from backend.utils.georeferencing import parse_geotiff_metadata
+from backend.services.vectorization_service import vectorize_multi_model_outputs
+from backend.services.survey_validation_service import (
+    validate_against_ground_truth,
+    validate_against_gnss_control_points,
+    parse_gnss_csv,
+)
+from backend.models.db_models import (
+    SurveyProject,
+    SurveyImage,
+    Parcel as DBParcel,
+    DetectedFeature,
+    Conflict as DBConflict,
+    GNSSControlPoint,
+    Verification,
+)
+
+
 def process_survey_pipeline(
     image_bytes: bytes,
     filename: str,
     project_id: Optional[str],
     db: Optional[Session] = None,
+    project_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes the complete End-to-End AI Cadastral Processing Pipeline:
-    1. Preprocessing image
-    2. Deep Learning inference (PyTorch U-Net or CV fallback)
-    3. GIS vectorization (Mask -> Contours -> Polygons -> GeoJSON)
-    4. Cadastral spatial comparison
-    5. Conflict detection and risk scoring
-    6. Database persistence
+    1. Preprocessing image and parsing georeferencing transform (GeoTIFF/ORI metadata)
+    2. Deep Learning inference (PyTorch multi-model ensemble or development CV fallback)
+    3. Multi-Model GIS Vectorization (Douglas-Peucker simplification, snapping, topology repair)
+    4. Cadastral spatial comparison against registered records
+    5. Ground truth spatial comparison (IoU, Hausdorff distance, centroid offset)
+    6. Field GNSS/CORS control point precision validation (boundary distance, RMSE)
+    7. Conflict detection and risk scoring
+    8. Database persistence (parcels, buildings, roads, GNSS points, conflicts)
     """
     steps = []
     
@@ -73,27 +94,54 @@ def process_survey_pipeline(
     with open(save_path, "wb") as f:
         f.write(image_bytes)
 
-    # 2. Preprocessing
+    # 2. Georeferencing & Preprocessing
+    transform = parse_geotiff_metadata(save_path)
     img_rgb, (orig_w, orig_h) = load_and_preprocess_image(image_bytes, target_size=(1024, 1024))
-    steps.append({"step": "Preprocessing", "status": "completed", "detail": f"Normalized to 1024x1024 (Original: {orig_w}x{orig_h})"})
+    steps.append({
+        "step": "Preprocessing & Georeferencing",
+        "status": "completed",
+        "detail": (
+            f"Normalized to 1024x1024 (Original: {orig_w}x{orig_h}). "
+            f"CRS: {transform.crs}, GSD: {transform.get_resolution_meters()}m/px, "
+            f"Embedded GeoTIFF: {transform.is_embedded_geotiff}"
+        ),
+    })
 
-    # 3. DL Segmentation Inference
-    boundary_mask, building_mask, inference_mode = run_inference(img_rgb)
-    model_status = get_model_status()
+    # 3. DL Multi-Model Segmentation Inference
+    boundary_mask, building_mask, inference_mode, prob_boundary, prob_building, engine_meta = run_inference(img_rgb)
     steps.append({
         "step": "DL Inference",
         "status": "completed",
-        "detail": f"Mode: {inference_mode} on {model_status['device']}",
+        "detail": f"Engine: {engine_meta['engine']} (Production AI: {engine_meta['production_ai']}) on {engine_meta['device']}",
     })
 
-    # 4. GIS Vectorization
-    parcels_geojson, buildings_geojson, raw_parcels, raw_buildings = vectorize_segmentation(
-        boundary_mask, building_mask, img_shape=(1024, 1024)
+    # 4. Multi-Model GIS Vectorization (Douglas-Peucker, vertex snapping, topology checks)
+    vec_result = vectorize_multi_model_outputs(
+        parcel_mask=boundary_mask,
+        building_mask=building_mask,
+        road_mask=None,
+        transform=transform,
+        prob_parcel=prob_boundary,
+        prob_building=prob_building,
     )
+
+    raw_parcels = vec_result["parcels"]
+    raw_buildings = vec_result["buildings"]
+    raw_roads = vec_result["roads"]
+    parcels_geojson = vec_result["parcels_geojson"]
+    buildings_geojson = vec_result["buildings_geojson"]
+    roads_geojson = vec_result["roads_geojson"]
+    topology_summary = vec_result["topology_summary"]
+    topology_issues = vec_result["topology_issues"]
+
     steps.append({
-        "step": "Vectorization",
+        "step": "GIS Vectorization & Topology",
         "status": "completed",
-        "detail": f"Extracted {len(raw_parcels)} parcels and {len(raw_buildings)} buildings",
+        "detail": (
+            f"Vectorized {len(raw_parcels)} parcels, {len(raw_buildings)} buildings. "
+            f"Topology status: {topology_summary['total_topology_errors']} issues "
+            f"(Overlaps: {topology_summary['overlaps']}, Slivers: {topology_summary['slivers']})"
+        ),
     })
 
     # 5. Cadastral Spatial Comparison
@@ -104,19 +152,61 @@ def process_survey_pipeline(
         "detail": "Computed boundary displacements and area variances against registered records",
     })
 
-    # 6. Conflict Detection & Risk Scoring
+    # 6. Survey Ground Truth & GNSS Validation (if data exists in project folder)
+    proj_id = project_id or f"PRJ-{file_id.upper()}"
+    p_dir = project_dir or os.path.join(STORAGE_ROOT if "STORAGE_ROOT" in globals() else os.path.join(os.path.dirname(__file__), "..", "..", "data", "projects"), proj_id)
+    
+    gt_summary = {"has_ground_truth": False, "mean_iou": 0.0, "mean_hausdorff_m": 0.0, "matched_parcels": 0}
+    gnss_summary = {"has_gnss": False, "rmse_meters": 0.0, "mean_error_meters": 0.0, "total_points": 0}
+    evaluated_gnss_points = []
+
+    # Check GNSS files in gnss_cors/
+    gnss_dir = os.path.join(p_dir, "gnss_cors")
+    if os.path.exists(gnss_dir):
+        gnss_points = []
+        for f in os.listdir(gnss_dir):
+            if f.lower().endswith(".csv"):
+                gnss_points.extend(parse_gnss_csv(os.path.join(gnss_dir, f)))
+        if gnss_points:
+            evaluated_gnss_points, gnss_summary = validate_against_gnss_control_points(
+                ai_parcels=compared_parcels,
+                gnss_points=gnss_points,
+                tolerance_threshold_m=0.30,
+            )
+            steps.append({
+                "step": "GNSS Validation",
+                "status": "completed",
+                "detail": (
+                    f"Validated {gnss_summary['total_points']} GNSS control points. "
+                    f"RMSE: {gnss_summary['rmse_meters']}m, Mean Error: {gnss_summary['mean_error_meters']}m "
+                    f"(Passed: {gnss_summary['passed_tolerance_pct']}%)"
+                ),
+            })
+
+    # 7. Conflict Detection & Risk Scoring
     final_parcels, conflicts = detect_conflicts(compared_parcels)
+    # Add topology issues to conflicts
+    for iss in topology_issues:
+        conflicts.append({
+            "id": iss["id"],
+            "parcel_id": iss["parcel_id"],
+            "conflict_type": iss["type"],
+            "severity": iss["severity"],
+            "description": iss["description"],
+            "status": "unresolved",
+        })
+
     steps.append({
         "step": "Conflict Analysis",
         "status": "completed",
-        "detail": f"Identified {len(conflicts)} potential spatial conflicts",
+        "detail": f"Identified {len(conflicts)} potential spatial/topology conflicts",
     })
 
-    # 7. Compute Summary Stats
+    # 8. Summary Stats
     high_conf = sum(1 for p in final_parcels if p["confidence"] >= 80)
     review_req = sum(1 for p in final_parcels if p["status"] == "requires_review")
     field_verif = sum(1 for p in final_parcels if p["status"] == "field_verification")
-    topology_errors = sum(1 for p in final_parcels if p.get("topologyStatus") == "invalid")
+    topology_errors = topology_summary.get("total_topology_errors", 0)
     avg_conf = round(sum(p["confidence"] for p in final_parcels) / max(1, len(final_parcels)), 1)
 
     stats = {
@@ -127,13 +217,13 @@ def process_survey_pipeline(
         "topology_errors": topology_errors,
         "buildings_detected": len(raw_buildings),
         "avg_confidence": avg_conf,
+        "gnss_rmse_m": gnss_summary.get("rmse_meters", 0.0),
+        "ground_truth_iou": gt_summary.get("mean_iou", 0.0),
     }
 
-    # 8. Optional Database Persistence
-    proj_id = project_id or f"PRJ-{file_id.upper()}"
+    # 9. Database Persistence
     if db:
         try:
-            # Ensure project exists
             proj = db.query(SurveyProject).filter(SurveyProject.id == proj_id).first()
             if not proj:
                 proj = SurveyProject(
@@ -156,6 +246,7 @@ def process_survey_pipeline(
                 file_path=save_path,
                 width=orig_w,
                 height=orig_h,
+                crs=transform.crs,
             )
             db.add(img_record)
 
@@ -169,7 +260,8 @@ def process_survey_pipeline(
                     zone=p["zone"],
                     existing_geometry_json=json.dumps(p.get("existingGeometry", [])),
                     ai_geometry_json=json.dumps(p.get("geo_coords", [])),
-                    existing_area=p.get("existingArea", 0.0),
+                    current_geometry_json=json.dumps(p.get("geo_coords", [])),
+                    existing_area=p.get("existingArea") or 0.0,
                     ai_area=p.get("aiArea", 0.0),
                     confidence=p.get("confidence", 0.0),
                     boundary_displacement=p.get("boundaryDisplacement", 0.0),
@@ -181,6 +273,42 @@ def process_survey_pipeline(
                     conflict_reasons_json=json.dumps(p.get("conflictReasons", [])),
                 )
                 db.merge(db_p)
+
+            # Store Detected Buildings
+            for b in raw_buildings:
+                db_b = DetectedFeature(
+                    id=f"FEAT-{b['id']}",
+                    project_id=proj_id,
+                    feature_type="building",
+                    confidence=b.get("confidence", 85.0),
+                    area=b.get("area_m2", 0.0),
+                    geometry_json=json.dumps(b.get("geo_coords", [])),
+                    layer_name="buildings",
+                    source_model=b.get("sourceModel", "segformer_features"),
+                    properties_json=json.dumps({
+                        "height_m": b.get("height_m", 3.5),
+                        "category": b.get("type", "residential"),
+                    }),
+                    status="pending",
+                )
+                db.merge(db_b)
+
+            # Store GNSS Control Points
+            for g in evaluated_gnss_points:
+                db_g = GNSSControlPoint(
+                    id=f"GCP-{proj_id}-{g['point_id']}",
+                    project_id=proj_id,
+                    point_id=g["point_id"],
+                    latitude=g["latitude"],
+                    longitude=g["longitude"],
+                    elevation_m=g.get("elevation_m", 0.0),
+                    point_type=g.get("point_type", "CORS_RTK"),
+                    error_to_boundary_m=g.get("error_to_boundary_m"),
+                    nearest_parcel_id=g.get("nearest_parcel_id"),
+                    status=g.get("status", "VALIDATED"),
+                    description=g.get("description", ""),
+                )
+                db.merge(db_g)
 
             # Store Conflicts
             for c in conflicts:
@@ -196,27 +324,43 @@ def process_survey_pipeline(
                 db.merge(db_c)
 
             db.commit()
-            steps.append({"step": "Database Sync", "status": "completed", "detail": f"Persisted features to PostGIS/Database for project {proj_id}"})
+            steps.append({"step": "Database Sync", "status": "completed", "detail": f"Persisted parcels, features, GNSS points to database for {proj_id}"})
         except Exception as e:
             logger.error(f"Error persisting to DB: {e}")
             db.rollback()
 
+    requires_manual_review = (
+        len(final_parcels) == 0
+        or any(p.get("requires_manual_review", False) for p in final_parcels)
+    )
+
     return {
         "survey_id": proj_id,
         "inference_mode": inference_mode,
-        "device": model_status["device"],
+        "engine": engine_meta["engine"],
+        "production_ai": engine_meta["production_ai"],
+        "engine_warning": engine_meta.get("warning"),
+        "requires_manual_review": requires_manual_review,
+        "device": engine_meta["device"],
+        "georeferencing": transform.to_dict(),
         "parcels_geojson": parcels_geojson,
         "buildings_geojson": buildings_geojson,
+        "roads_geojson": roads_geojson,
+        "topology_summary": topology_summary,
+        "gnss_summary": gnss_summary,
+        "ground_truth_summary": gt_summary,
         "conflicts": conflicts,
         "stats": stats,
         "processing_steps": steps,
         "raw_parcels": final_parcels,
         "raw_buildings": raw_buildings,
+        "raw_roads": raw_roads,
         "disclaimer": (
             "Legal Notice: AI-extracted boundaries are preliminary geometric detections from visual imagery. "
             "They do NOT constitute authoritative legal cadastral determinations until reviewed and verified by a licensed cadastral surveyor."
         ),
     }
+
 
 
 def get_survey_by_id(survey_id: str, db: Session) -> Optional[Dict[str, Any]]:

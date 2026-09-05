@@ -4,20 +4,21 @@ import { Button, Card, AIDisclaimer } from '@/components/UI';
 import { analyzeAerialImage, type AIAnalysisOutput } from '@/services/AIService';
 import {
   CheckCircle2, Loader2, Circle, ArrowRight, Cpu, Scan,
-  Building2, GitCompare, GitBranch, BarChart3, Sparkles, AlertCircle,
+  Building2, GitCompare, GitBranch, BarChart3, Sparkles, AlertCircle, Layers,
 } from 'lucide-react';
 
 const STAGES = [
-  { id: 0, label: 'Loading aerial imagery', icon: Scan, detail: 'Reading GeoTIFF tiles and orthorectified imagery' },
-  { id: 1, label: 'Image preprocessing', icon: Cpu, detail: 'Normalization, color balancing, tile slicing' },
-  { id: 2, label: 'PyTorch U-Net segmentation', icon: Sparkles, detail: 'Deep learning model detecting boundaries & rooftops' },
-  { id: 3, label: 'Building detection', icon: Building2, detail: 'Extracting building footprints and heights' },
-  { id: 4, label: 'Feature extraction', icon: Scan, detail: 'Boundary lines, walls, roads, corridors' },
-  { id: 5, label: 'Preliminary parcel generation', icon: Sparkles, detail: 'Vectorizing detected boundaries into GeoJSON polygons' },
-  { id: 6, label: 'Existing GIS comparison', icon: GitCompare, detail: 'Spatial comparison with registered cadastral records' },
-  { id: 7, label: 'Topology validation', icon: GitBranch, detail: 'Checking overlaps, gaps, self-intersections' },
-  { id: 8, label: 'Confidence scoring', icon: BarChart3, detail: 'Assigning per-parcel confidence and risk priorities' },
-  { id: 9, label: 'Analysis completed', icon: CheckCircle2, detail: 'Preliminary parcel map ready for surveyor review' },
+  { id: 0, label: 'Ingestion & Preflight Validation', icon: Scan, detail: 'Validating CRS, coordinate bounds, and SIH data directories' },
+  { id: 1, label: 'Georeferencing & Spatial Transform', icon: Cpu, detail: 'Parsing GeoTIFF metadata, GSD resolution, and WGS84 mapping' },
+  { id: 2, label: 'Elevation Modeling (nDSM)', icon: Layers, detail: 'Computing nDSM = DSM - DTM to extract structure heights' },
+  { id: 3, label: 'Model 1: Parcel U-Net Boundaries', icon: Sparkles, detail: 'Deep learning boundary delineation & wall segmentation' },
+  { id: 4, label: 'Model 2: SegFormer Footprints & LULC', icon: Building2, detail: 'Extracting building polygons and land use classifications' },
+  { id: 5, label: 'Model 3: DeepLab Road Networks', icon: Scan, detail: 'Extracting road corridors and skeletonized centerlines' },
+  { id: 6, label: 'Vectorization & Douglas-Peucker', icon: Sparkles, detail: 'Simplifying contours and converting to survey-grade GeoJSON' },
+  { id: 7, label: 'Topology Engine & Snapping', icon: GitBranch, detail: 'Sub-meter vertex snapping and overlap/sliver validation' },
+  { id: 8, label: 'Cadastral Spatial Comparison', icon: GitCompare, detail: 'Calculating displacement & area difference against deeds' },
+  { id: 9, label: 'GNSS/CORS Precision Validation', icon: BarChart3, detail: 'Calculating boundary RMSE and field tolerance compliance' },
+  { id: 10, label: 'Survey Certification & GIS Ready', icon: CheckCircle2, detail: 'GeoJSON, Shapefile, KML, DXF, and PDF report ready' },
 ];
 
 export default function AIProcessing() {
@@ -229,11 +230,16 @@ export default function AIProcessing() {
 
             <div className="flex items-center justify-between flex-wrap gap-3 pt-2 border-t border-green-200/60">
               <div className="text-xs text-slate-600">
-                Georeferenced orthomosaic and vector polygons are ready in the WebGIS map viewer.
+                Georeferenced orthomosaic and vector polygons are ready in the WebGIS map viewer and Architecture Outputs dashboard.
               </div>
-              <Button variant="primary" size="lg" onClick={() => setCurrentPage('cadastral-map')}>
-                Open Real Cadastral Map (WebGIS) <ArrowRight className="w-4 h-4" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="md" onClick={() => setCurrentPage('outputs')}>
+                  <Layers className="w-4 h-4 text-emerald-600" /> Architecture Outputs View
+                </Button>
+                <Button variant="primary" size="md" onClick={() => setCurrentPage('cadastral-map')}>
+                  Open Real Cadastral Map (WebGIS) <ArrowRight className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </div>
         </Card>

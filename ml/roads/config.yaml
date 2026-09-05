@@ -1,0 +1,16 @@
+model:
+  name: DeepLabRoads
+  in_channels: 3
+  num_classes: 3
+  target_size: [512, 512]
+
+training:
+  batch_size: 4
+  epochs: 25
+  learning_rate: 0.0006
+  save_path: "backend/weights/deeplab_roads.pth"
+
+classes:
+  0: "Non-road"
+  1: "Paved Road"
+  2: "Pathway / Access Corridor"

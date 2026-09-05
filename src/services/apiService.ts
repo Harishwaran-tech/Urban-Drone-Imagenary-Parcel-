@@ -3,7 +3,7 @@
  * Manages HTTP communication between React Frontend and FastAPI Backend.
  */
 
-export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8001';
 
 export interface BackendHealthResponse {
   status: string;
@@ -179,4 +179,62 @@ export const apiService = {
     }
     return res.json();
   },
+
+  /**
+   * Triggers processing on standard SIH project inputs directory.
+   */
+  async processProject(projectId: string) {
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/process`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to process project' }));
+      throw new Error(err.detail?.message || err.detail || 'Processing failed');
+    }
+    return res.json();
+  },
+
+  /**
+   * Retrieves live execution stage and progress percentage.
+   */
+  async getProjectStatus(projectId: string) {
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/status`);
+    if (!res.ok) throw new Error('Failed to get project status');
+    return res.json();
+  },
+
+  /**
+   * Surveyor verification workflow.
+   */
+  async verifyParcelWorkflow(
+    projectId: string,
+    parcelId: string,
+    action: 'verify' | 'correct' | 'reject' | 'mark_review',
+    surveyorName = 'Licensed Surveyor',
+    notes = '',
+    checklist?: Record<string, boolean>,
+    correctedCoords?: [number, number][]
+  ) {
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/parcels/${parcelId}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        surveyor_name: surveyorName,
+        notes,
+        checklist,
+        corrected_coords: correctedCoords,
+      }),
+    });
+    if (!res.ok) throw new Error(`Failed to update parcel ${parcelId}`);
+    return res.json();
+  },
+
+  /**
+   * Export download URLs for direct browser triggers.
+   */
+  getExportUrl(projectId: string, format: 'shapefile' | 'pdf' | 'dxf' | 'geojson' | 'kml') {
+    return `${API_BASE_URL}/api/projects/${projectId}/export/${format}`;
+  },
 };
+

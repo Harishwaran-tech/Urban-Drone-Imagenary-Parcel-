@@ -3,6 +3,7 @@ import type {
   Building,
   Road,
   GNSSPoint,
+  GTPoint,
   TopologyIssue,
   Project,
   Surveyor,
@@ -119,88 +120,106 @@ interface ParcelDefinition {
   isIssue?: boolean;
   conflictType?: ConflictType;
   confidence?: number;
+  hasExisting?: boolean;
+  hasAi?: boolean;
+  dx?: number;
+  dy?: number;
 }
 
 const RAW_PARCELS: ParcelDefinition[] = [
   // West Block (Left of Avenue 1)
-  { idSuffix: 101, px1: 15, py1: 15, px2: 120, py2: 130, bx1: 28, by1: 25, bx2: 110, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 102, px1: 15, py1: 140, px2: 120, py2: 260, bx1: 25, by1: 150, bx2: 112, by2: 250, landUse: 'Residential', roofColor: '#ea580c', isIssue: true, conflictType: 'boundary_mismatch' },
-  { idSuffix: 103, px1: 15, py1: 270, px2: 120, py2: 400, bx1: 25, by1: 280, bx2: 112, by2: 385, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 104, px1: 15, py1: 410, px2: 120, py2: 545, bx1: 22, by1: 420, bx2: 112, by2: 535, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 105, px1: 15, py1: 555, px2: 120, py2: 690, bx1: 22, by1: 565, bx2: 112, by2: 680, landUse: 'Residential', roofColor: '#f97316' },
+  { idSuffix: 101, px1: 15, py1: 15, px2: 120, py2: 130, bx1: 28, by1: 25, bx2: 110, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 102, px1: 15, py1: 140, px2: 120, py2: 260, bx1: 25, by1: 150, bx2: 112, by2: 250, landUse: 'Residential', roofColor: '#ea580c', isIssue: true, conflictType: 'boundary_mismatch', hasExisting: true, hasAi: true, dx: 14, dy: 10 },
+  { idSuffix: 103, px1: 15, py1: 270, px2: 120, py2: 400, bx1: 25, by1: 280, bx2: 112, by2: 385, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: false },
+  { idSuffix: 104, px1: 15, py1: 410, px2: 120, py2: 545, bx1: 22, by1: 420, bx2: 112, by2: 535, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 105, px1: 15, py1: 555, px2: 120, py2: 690, bx1: 22, by1: 565, bx2: 112, by2: 680, landUse: 'Residential', roofColor: '#f97316', hasExisting: true, hasAi: true },
 
   // Mid-West Column - West Facing
-  { idSuffix: 111, px1: 158, py1: 15, px2: 255, py2: 130, bx1: 168, by1: 25, bx2: 248, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 112, px1: 158, py1: 140, px2: 255, py2: 260, bx1: 168, by1: 150, bx2: 248, by2: 250, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 113, px1: 158, py1: 270, px2: 255, py2: 400, bx1: 168, by1: 280, bx2: 248, by2: 385, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 114, px1: 158, py1: 410, px2: 255, py2: 545, bx1: 168, by1: 420, bx2: 248, by2: 535, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 115, px1: 158, py1: 555, px2: 255, py2: 690, bx1: 168, by1: 565, bx2: 248, by2: 680, landUse: 'Residential', roofColor: '#f97316', isIssue: true, conflictType: 'overlap' },
+  { idSuffix: 111, px1: 158, py1: 15, px2: 255, py2: 130, bx1: 168, by1: 25, bx2: 248, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 112, px1: 158, py1: 140, px2: 255, py2: 260, bx1: 168, by1: 150, bx2: 248, by2: 250, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 113, px1: 158, py1: 270, px2: 255, py2: 400, bx1: 168, by1: 280, bx2: 248, by2: 385, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: false },
+  { idSuffix: 114, px1: 158, py1: 410, px2: 255, py2: 545, bx1: 168, by1: 420, bx2: 248, by2: 535, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 115, px1: 158, py1: 555, px2: 255, py2: 690, bx1: 168, by1: 565, bx2: 248, by2: 680, landUse: 'Residential', roofColor: '#f97316', isIssue: true, conflictType: 'overlap', hasExisting: true, hasAi: true, dx: 16, dy: 14 },
 
   // Mid-West Column - East Facing
-  { idSuffix: 121, px1: 265, py1: 15, px2: 362, py2: 130, bx1: 275, by1: 25, bx2: 355, by2: 120, landUse: 'Commercial', roofColor: '#cbd5e1' },
-  { idSuffix: 122, px1: 265, py1: 140, px2: 362, py2: 260, bx1: 275, by1: 150, bx2: 355, by2: 250, landUse: 'Commercial', roofColor: '#cbd5e1' },
-  { idSuffix: 123, px1: 265, py1: 270, px2: 362, py2: 400, bx1: 275, by1: 280, bx2: 355, by2: 385, landUse: 'Commercial', roofColor: '#cbd5e1' },
-  { idSuffix: 124, px1: 265, py1: 410, px2: 362, py2: 545, bx1: 275, by1: 420, bx2: 355, by2: 535, landUse: 'Commercial', roofColor: '#cbd5e1' },
-  { idSuffix: 125, px1: 265, py1: 555, px2: 362, py2: 690, bx1: 275, by1: 565, bx2: 355, by2: 680, landUse: 'Commercial', roofColor: '#f97316' },
+  { idSuffix: 121, px1: 265, py1: 15, px2: 362, py2: 130, bx1: 275, by1: 25, bx2: 355, by2: 120, landUse: 'Commercial', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 122, px1: 265, py1: 140, px2: 362, py2: 260, bx1: 275, by1: 150, bx2: 355, by2: 250, landUse: 'Commercial', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 123, px1: 265, py1: 270, px2: 362, py2: 400, bx1: 275, by1: 280, bx2: 355, by2: 385, landUse: 'Commercial', roofColor: '#cbd5e1', hasExisting: true, hasAi: false },
+  { idSuffix: 124, px1: 265, py1: 410, px2: 362, py2: 545, bx1: 275, by1: 420, bx2: 355, by2: 535, landUse: 'Commercial', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 125, px1: 265, py1: 555, px2: 362, py2: 690, bx1: 275, by1: 565, bx2: 355, by2: 680, landUse: 'Commercial', roofColor: '#f97316', hasExisting: true, hasAi: true },
 
   // Center Column - North Tier
-  { idSuffix: 131, px1: 395, py1: 15, px2: 485, py2: 130, bx1: 405, by1: 20, bx2: 478, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 132, px1: 495, py1: 15, px2: 585, py2: 130, bx1: 505, by1: 20, bx2: 578, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 133, px1: 395, py1: 140, px2: 485, py2: 265, bx1: 405, by1: 148, bx2: 478, by2: 255, landUse: 'Residential', roofColor: '#ea580c' },
-  { idSuffix: 134, px1: 495, py1: 140, px2: 585, py2: 265, bx1: 505, by1: 148, bx2: 578, by2: 255, landUse: 'Residential', roofColor: '#cbd5e1' },
+  { idSuffix: 131, px1: 395, py1: 15, px2: 485, py2: 130, bx1: 405, by1: 20, bx2: 478, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 132, px1: 495, py1: 15, px2: 585, py2: 130, bx1: 505, by1: 20, bx2: 578, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 133, px1: 395, py1: 140, px2: 485, py2: 265, bx1: 405, by1: 148, bx2: 478, by2: 255, landUse: 'Residential', roofColor: '#ea580c', hasExisting: true, hasAi: true },
+  { idSuffix: 134, px1: 495, py1: 140, px2: 585, py2: 265, bx1: 505, by1: 148, bx2: 578, by2: 255, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
 
   // Center Column - South Tier (Featured Parcel TN-CHN-W42-000184)
-  { idSuffix: '000184', px1: 395, py1: 295, px2: 485, py2: 415, bx1: 405, by1: 305, bx2: 478, by2: 405, landUse: 'Residential', roofColor: '#cbd5e1', confidence: 92.4 },
-  { idSuffix: 185, px1: 495, py1: 295, px2: 585, py2: 415, bx1: 505, by1: 305, bx2: 578, by2: 405, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 186, px1: 395, py1: 425, px2: 485, py2: 515, bx1: 405, by1: 435, bx2: 478, by2: 505, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 187, px1: 495, py1: 425, px2: 585, py2: 515, bx1: 505, by1: 435, bx2: 578, by2: 505, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 188, px1: 395, py1: 525, px2: 485, py2: 615, bx1: 402, by1: 532, bx2: 475, by2: 608, landUse: 'Residential', roofColor: '#ea580c' },
-  { idSuffix: 189, px1: 495, py1: 525, px2: 585, py2: 615, bx1: 505, by1: 532, bx2: 575, by2: 608, landUse: 'Residential', roofColor: '#cbd5e1', isIssue: true, conflictType: 'area_mismatch' },
-  { idSuffix: 190, px1: 395, py1: 625, px2: 485, py2: 725, bx1: 402, by1: 635, bx2: 478, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 191, px1: 495, py1: 625, px2: 585, py2: 725, bx1: 505, by1: 635, bx2: 575, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1' },
+  { idSuffix: '000184', px1: 395, py1: 295, px2: 485, py2: 415, bx1: 405, by1: 305, bx2: 478, by2: 405, landUse: 'Residential', roofColor: '#cbd5e1', confidence: 92.4, hasExisting: true, hasAi: true },
+  { idSuffix: 185, px1: 495, py1: 295, px2: 585, py2: 415, bx1: 505, by1: 305, bx2: 578, by2: 405, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 186, px1: 395, py1: 425, px2: 485, py2: 515, bx1: 405, by1: 435, bx2: 478, by2: 505, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 187, px1: 495, py1: 425, px2: 585, py2: 515, bx1: 505, by1: 435, bx2: 578, by2: 505, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 188, px1: 395, py1: 525, px2: 485, py2: 615, bx1: 402, by1: 532, bx2: 475, by2: 608, landUse: 'Residential', roofColor: '#ea580c', hasExisting: true, hasAi: true },
+  { idSuffix: 189, px1: 495, py1: 525, px2: 585, py2: 615, bx1: 505, by1: 532, bx2: 575, by2: 608, landUse: 'Residential', roofColor: '#cbd5e1', isIssue: true, conflictType: 'area_mismatch', hasExisting: true, hasAi: true, dx: 15, dy: 12 },
+  { idSuffix: 190, px1: 395, py1: 625, px2: 485, py2: 725, bx1: 402, by1: 635, bx2: 478, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 191, px1: 495, py1: 625, px2: 585, py2: 725, bx1: 505, by1: 635, bx2: 575, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
 
   // Mid-East Column (Between Avenue 3 and 4)
-  { idSuffix: 201, px1: 615, py1: 15, px2: 712, py2: 130, bx1: 625, by1: 22, bx2: 705, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 202, px1: 615, py1: 140, px2: 712, py2: 270, bx1: 628, by1: 150, bx2: 705, by2: 260, landUse: 'Residential', roofColor: '#ea580c' },
-  { idSuffix: 203, px1: 615, py1: 280, px2: 712, py2: 385, bx1: 625, by1: 290, bx2: 705, by2: 375, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 204, px1: 615, py1: 395, px2: 712, py2: 490, bx1: 625, by1: 405, bx2: 705, by2: 480, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 205, px1: 615, py1: 500, px2: 712, py2: 605, bx1: 625, by1: 508, bx2: 705, by2: 595, landUse: 'Residential', roofColor: '#ea580c' },
-  { idSuffix: 206, px1: 615, py1: 615, px2: 712, py2: 725, bx1: 625, by1: 625, bx2: 705, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1' },
+  { idSuffix: 201, px1: 615, py1: 15, px2: 712, py2: 130, bx1: 625, by1: 22, bx2: 705, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 202, px1: 615, py1: 140, px2: 712, py2: 270, bx1: 628, by1: 150, bx2: 705, by2: 260, landUse: 'Residential', roofColor: '#ea580c', hasExisting: true, hasAi: true },
+  { idSuffix: 203, px1: 615, py1: 280, px2: 712, py2: 385, bx1: 625, by1: 290, bx2: 705, by2: 375, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: false },
+  { idSuffix: 204, px1: 615, py1: 395, px2: 712, py2: 490, bx1: 625, by1: 405, bx2: 705, by2: 480, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 205, px1: 615, py1: 500, px2: 712, py2: 605, bx1: 625, by1: 508, bx2: 705, by2: 595, landUse: 'Residential', roofColor: '#ea580c', hasExisting: true, hasAi: true },
+  { idSuffix: 206, px1: 615, py1: 615, px2: 712, py2: 725, bx1: 625, by1: 625, bx2: 705, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
 
-  { idSuffix: 211, px1: 722, py1: 15, px2: 820, py2: 130, bx1: 732, by1: 22, bx2: 812, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 212, px1: 722, py1: 140, px2: 820, py2: 270, bx1: 732, by1: 150, bx2: 812, by2: 260, landUse: 'Residential', roofColor: '#cbd5e1', isIssue: true, conflictType: 'boundary_mismatch' },
-  { idSuffix: 213, px1: 722, py1: 280, px2: 820, py2: 385, bx1: 732, by1: 290, bx2: 812, by2: 375, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 214, px1: 722, py1: 395, px2: 820, py2: 490, bx1: 732, by1: 405, bx2: 812, by2: 480, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 215, px1: 722, py1: 500, px2: 820, py2: 605, bx1: 732, by1: 508, bx2: 812, by2: 595, landUse: 'Residential', roofColor: '#f97316' },
-  { idSuffix: 216, px1: 722, py1: 615, px2: 820, py2: 725, bx1: 732, by1: 625, bx2: 812, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1' },
+  { idSuffix: 211, px1: 722, py1: 15, px2: 820, py2: 130, bx1: 732, by1: 22, bx2: 812, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 212, px1: 722, py1: 140, px2: 820, py2: 270, bx1: 732, by1: 150, bx2: 812, by2: 260, landUse: 'Residential', roofColor: '#cbd5e1', isIssue: true, conflictType: 'boundary_mismatch', hasExisting: true, hasAi: true, dx: 18, dy: -10 },
+  { idSuffix: 213, px1: 722, py1: 280, px2: 820, py2: 385, bx1: 732, by1: 290, bx2: 812, by2: 375, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: false },
+  { idSuffix: 214, px1: 722, py1: 395, px2: 820, py2: 490, bx1: 732, by1: 405, bx2: 812, by2: 480, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 215, px1: 722, py1: 500, px2: 820, py2: 605, bx1: 732, by1: 508, bx2: 812, by2: 595, landUse: 'Residential', roofColor: '#f97316', hasExisting: true, hasAi: true },
+  { idSuffix: 216, px1: 722, py1: 615, px2: 820, py2: 725, bx1: 732, by1: 625, bx2: 812, by2: 715, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
 
   // Far-East Column
-  { idSuffix: 221, px1: 855, py1: 15, px2: 985, py2: 130, bx1: 865, by1: 22, bx2: 975, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 222, px1: 855, py1: 140, px2: 985, py2: 270, bx1: 865, by1: 150, bx2: 975, by2: 260, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 223, px1: 855, py1: 280, px2: 985, py2: 400, bx1: 865, by1: 290, bx2: 975, by2: 390, landUse: 'Residential', roofColor: '#ea580c' },
-  { idSuffix: 224, px1: 855, py1: 410, px2: 985, py2: 545, bx1: 865, by1: 420, bx2: 975, by2: 535, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 225, px1: 855, py1: 555, px2: 985, py2: 690, bx1: 865, by1: 565, bx2: 975, by2: 680, landUse: 'Residential', roofColor: '#ea580c' },
+  { idSuffix: 221, px1: 855, py1: 15, px2: 985, py2: 130, bx1: 865, by1: 22, bx2: 975, by2: 120, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 222, px1: 855, py1: 140, px2: 985, py2: 270, bx1: 865, by1: 150, bx2: 975, by2: 260, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: false },
+  { idSuffix: 223, px1: 855, py1: 280, px2: 985, py2: 400, bx1: 865, by1: 290, bx2: 975, by2: 390, landUse: 'Residential', roofColor: '#ea580c', hasExisting: true, hasAi: true },
+  { idSuffix: 224, px1: 855, py1: 410, px2: 985, py2: 545, bx1: 865, by1: 420, bx2: 975, by2: 535, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true },
+  { idSuffix: 225, px1: 855, py1: 555, px2: 985, py2: 690, bx1: 865, by1: 565, bx2: 975, by2: 680, landUse: 'Residential', roofColor: '#ea580c', hasExisting: true, hasAi: true },
 
-  // South Block (Below Main Street at y ≈ 770)
-  { idSuffix: 231, px1: 20, py1: 780, px2: 125, py2: 880, bx1: 30, by1: 790, bx2: 115, by2: 870, landUse: 'Residential', roofColor: '#f97316' },
-  { idSuffix: 232, px1: 20, py1: 890, px2: 125, py2: 985, bx1: 30, by1: 900, bx2: 115, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 233, px1: 155, py1: 780, px2: 255, py2: 880, bx1: 165, by1: 790, bx2: 245, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 234, px1: 155, py1: 890, px2: 255, py2: 985, bx1: 165, by1: 900, bx2: 245, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 235, px1: 265, py1: 780, px2: 360, py2: 880, bx1: 275, by1: 790, bx2: 350, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 236, px1: 265, py1: 890, px2: 360, py2: 985, bx1: 275, by1: 900, bx2: 350, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
+  // SOUTH SECTOR: Dense AI Predicted Boundaries (Matching Image 2 vibrant magenta cluster)
+  { idSuffix: 231, px1: 20, py1: 780, px2: 125, py2: 880, bx1: 30, by1: 790, bx2: 115, by2: 870, landUse: 'Residential', roofColor: '#f97316', hasExisting: false, hasAi: true, confidence: 95.8 },
+  { idSuffix: 232, px1: 20, py1: 890, px2: 125, py2: 985, bx1: 30, by1: 900, bx2: 115, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 93.2 },
+  { idSuffix: 233, px1: 155, py1: 780, px2: 255, py2: 880, bx1: 165, by1: 790, bx2: 245, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: true, hasAi: true, confidence: 94.6 },
+  { idSuffix: 234, px1: 155, py1: 890, px2: 255, py2: 985, bx1: 165, by1: 900, bx2: 245, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 91.5 },
+  { idSuffix: 235, px1: 265, py1: 780, px2: 360, py2: 880, bx1: 275, by1: 790, bx2: 350, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 96.2 },
+  { idSuffix: 236, px1: 265, py1: 890, px2: 360, py2: 985, bx1: 275, by1: 900, bx2: 350, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 94.0 },
 
-  { idSuffix: 241, px1: 395, py1: 780, px2: 485, py2: 880, bx1: 405, by1: 790, bx2: 478, by2: 870, landUse: 'Residential', roofColor: '#f97316' },
-  { idSuffix: 242, px1: 395, py1: 890, px2: 485, py2: 985, bx1: 405, by1: 900, bx2: 478, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 243, px1: 495, py1: 780, px2: 585, py2: 880, bx1: 505, by1: 790, bx2: 578, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 244, px1: 495, py1: 890, px2: 585, py2: 985, bx1: 505, by1: 900, bx2: 578, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
+  // Dense South-Central Subdivided AI Lots (Image 2 vibrant magenta network)
+  { idSuffix: 241, px1: 395, py1: 780, px2: 440, py2: 880, bx1: 402, by1: 790, bx2: 435, by2: 870, landUse: 'Residential', roofColor: '#f97316', hasExisting: false, hasAi: true, confidence: 97.1 },
+  { idSuffix: '241B', px1: 442, py1: 780, px2: 488, py2: 880, bx1: 448, by1: 790, bx2: 482, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 96.5 },
+  { idSuffix: 242, px1: 395, py1: 890, px2: 440, py2: 985, bx1: 402, by1: 900, bx2: 435, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 93.8 },
+  { idSuffix: '242B', px1: 442, py1: 890, px2: 488, py2: 985, bx1: 448, by1: 900, bx2: 482, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 95.0 },
 
-  { idSuffix: 251, px1: 615, py1: 780, px2: 712, py2: 880, bx1: 625, by1: 790, bx2: 705, by2: 870, landUse: 'Residential', roofColor: '#f97316' },
-  { idSuffix: 252, px1: 615, py1: 890, px2: 712, py2: 985, bx1: 625, by1: 900, bx2: 705, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 253, px1: 722, py1: 780, px2: 820, py2: 880, bx1: 732, by1: 790, bx2: 812, by2: 870, landUse: 'Residential', roofColor: '#ea580c' },
-  { idSuffix: 254, px1: 722, py1: 890, px2: 820, py2: 985, bx1: 732, by1: 900, bx2: 812, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1' },
+  { idSuffix: 243, px1: 495, py1: 780, px2: 538, py2: 880, bx1: 502, by1: 790, bx2: 532, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 98.2 },
+  { idSuffix: '243B', px1: 540, py1: 780, px2: 585, py2: 880, bx1: 546, by1: 790, bx2: 580, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 97.4 },
+  { idSuffix: 244, px1: 495, py1: 890, px2: 538, py2: 985, bx1: 502, by1: 900, bx2: 532, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 92.9 },
+  { idSuffix: '244B', px1: 540, py1: 890, px2: 585, py2: 985, bx1: 546, by1: 900, bx2: 580, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 94.1 },
 
-  { idSuffix: 261, px1: 855, py1: 780, px2: 985, py2: 880, bx1: 865, by1: 790, bx2: 975, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1' },
-  { idSuffix: 262, px1: 855, py1: 890, px2: 985, py2: 985, bx1: 865, by1: 900, bx2: 975, by2: 975, landUse: 'Residential', roofColor: '#f97316' },
+  // Dense South-East Subdivided AI Lots (Image 2 magenta grid)
+  { idSuffix: 251, px1: 615, py1: 780, px2: 660, py2: 880, bx1: 622, by1: 790, bx2: 654, by2: 870, landUse: 'Residential', roofColor: '#f97316', hasExisting: false, hasAi: true, confidence: 96.0 },
+  { idSuffix: '251B', px1: 662, py1: 780, px2: 712, py2: 880, bx1: 668, by1: 790, bx2: 706, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 95.3 },
+  { idSuffix: 252, px1: 615, py1: 890, px2: 660, py2: 985, bx1: 622, by1: 900, bx2: 654, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 93.6 },
+  { idSuffix: '252B', px1: 662, py1: 890, px2: 712, py2: 985, bx1: 668, by1: 900, bx2: 706, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 94.7 },
+
+  { idSuffix: 253, px1: 722, py1: 780, px2: 770, py2: 880, bx1: 728, by1: 790, bx2: 764, by2: 870, landUse: 'Residential', roofColor: '#ea580c', hasExisting: false, hasAi: true, confidence: 97.0 },
+  { idSuffix: '253B', px1: 772, py1: 780, px2: 820, py2: 880, bx1: 778, by1: 790, bx2: 814, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 96.2 },
+  { idSuffix: 254, px1: 722, py1: 890, px2: 770, py2: 985, bx1: 728, by1: 900, bx2: 764, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 95.4 },
+  { idSuffix: '254B', px1: 772, py1: 890, px2: 820, py2: 985, bx1: 778, by1: 900, bx2: 814, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 94.8 },
+
+  { idSuffix: 261, px1: 855, py1: 780, px2: 918, py2: 880, bx1: 862, by1: 790, bx2: 912, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 96.7 },
+  { idSuffix: '261B', px1: 920, py1: 780, px2: 985, py2: 880, bx1: 926, by1: 790, bx2: 978, by2: 870, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 95.9 },
+  { idSuffix: 262, px1: 855, py1: 890, px2: 918, py2: 985, bx1: 862, by1: 900, bx2: 912, by2: 975, landUse: 'Residential', roofColor: '#f97316', hasExisting: false, hasAi: true, confidence: 93.9 },
+  { idSuffix: '262B', px1: 920, py1: 890, px2: 985, py2: 985, bx1: 926, by1: 900, bx2: 978, by2: 975, landUse: 'Residential', roofColor: '#cbd5e1', hasExisting: false, hasAi: true, confidence: 94.5 },
 ];
 
 export function generateParcels(projectPrefix = 'TN-CHN-W42'): Parcel[] {
@@ -219,16 +238,18 @@ export function generateParcels(projectPrefix = 'TN-CHN-W42'): Parcel[] {
       { x: item.px1, y: item.py2 },
     ];
 
-    // AI predicted boundary (tight fit to property lines)
+    // AI predicted boundary (tight fit to property lines, with realistic displacement if issue)
+    const dx = item.dx || 0;
+    const dy = item.dy || 0;
     const ai = [
-      { x: item.px1, y: item.py1 },
-      { x: item.px2, y: item.py1 },
-      { x: item.px2, y: item.py2 },
+      { x: item.px1 + dx, y: item.py1 + dy },
+      { x: item.px2 + dx, y: item.py1 },
+      { x: item.px2, y: item.py2 + dy },
       { x: item.px1, y: item.py2 },
     ];
 
     const existingArea = isFeatured ? 148.62 : Math.round((polygonArea(existing) * AREA_SCALE) * 100) / 100;
-    const aiArea = isFeatured ? 148.62 : existingArea;
+    const aiArea = isFeatured ? 148.62 : Math.round((polygonArea(ai) * AREA_SCALE) * 100) / 100;
     const perimeter = Math.round((polygonPerimeter(ai) * Math.sqrt(AREA_SCALE)) * 10) / 10;
 
     const confidence = item.confidence ?? (item.isIssue ? 72.5 : Math.round(randRange(88, 99.2) * 10) / 10);
@@ -250,8 +271,9 @@ export function generateParcels(projectPrefix = 'TN-CHN-W42'): Parcel[] {
       rand() < 0.7 ? 'verified' : 'not_reviewed';
 
     const status = isFeatured ? 'ai_preliminary' : getStatus(confidence, verificationStatus, conflictType, topologyStatus);
-    const priority = isFeatured ? 'LOW' : getPriority(confidence, 0, conflictType);
-    const conflictReasons = getConflictReasons(confidence, 0, 0.4, conflictType, false, 0);
+    const priority = isFeatured ? 'LOW' : getPriority(confidence, Math.abs(existingArea - aiArea), conflictType);
+    const displacement = Math.round(Math.sqrt(dx * dx + dy * dy) * Math.sqrt(AREA_SCALE) * 10) / 10;
+    const conflictReasons = getConflictReasons(confidence, Math.abs(existingArea - aiArea), displacement || 0.4, conflictType, false, 0);
 
     const bFloors = isFeatured ? 2 : (item.landUse === 'Commercial' ? 3 : randInt(1, 3));
     const bHeight = Math.round((bFloors * 3.2 + 0.8) * 10) / 10;
@@ -270,7 +292,7 @@ export function generateParcels(projectPrefix = 'TN-CHN-W42'): Parcel[] {
       boundaryConfidence,
       buildingConfidence,
       perimeter,
-      boundaryDisplacement: isFeatured ? 0.4 : 0.6,
+      boundaryDisplacement: isFeatured ? 0.4 : (displacement || 0.6),
       status,
       conflictType,
       priority,
@@ -278,7 +300,7 @@ export function generateParcels(projectPrefix = 'TN-CHN-W42'): Parcel[] {
       verificationStatus,
       topologyIssues,
       notes: '',
-      recommendation: isFeatured ? 'Accept AI boundary — high confidence prediction (92.4%).' : getRecommendation({ confidence, boundaryDisplacement: 0.6, conflictType, topologyStatus }),
+      recommendation: isFeatured ? 'Accept AI boundary — high confidence prediction (92.4%).' : getRecommendation({ confidence, boundaryDisplacement: displacement || 0.6, conflictType, topologyStatus }),
       conflictReasons,
       assignedSurveyor: verificationStatus === 'field_verification_required' ? pick(surveyors).name : null,
       checklist: {
@@ -296,9 +318,11 @@ export function generateParcels(projectPrefix = 'TN-CHN-W42'): Parcel[] {
       roofColor: item.roofColor,
       buildingType: item.landUse.toLowerCase() as any,
       landUse: item.landUse,
-      predictedBy: 'LAND-AI Model v2.1',
+      predictedBy: 'CadastraAI Model v2.1',
       createdOn: '18 May 2025 10:44 AM',
       isIssue,
+      hasExistingBoundary: item.hasExisting !== false,
+      hasAiBoundary: item.hasAi !== false,
     };
 
     parcels.push(parcel);
@@ -427,6 +451,39 @@ export function generateGNSSPoints(parcels: Parcel[]): GNSSPoint[] {
   return points;
 }
 
+export function generateGTPoints(): GTPoint[] {
+  const baseLat = 13.0827;
+  const baseLng = 80.2707;
+  const LAT_SPAN = 0.010;
+  const LNG_SPAN = 0.012;
+
+  const positions = [
+    { x: 275, y: 340, type: 'boundary_corner' as const, id: 'GT-001' },
+    { x: 490, y: 340, type: 'monument' as const, id: 'GT-002' },
+    { x: 710, y: 340, type: 'control_benchmark' as const, id: 'GT-003' },
+    { x: 275, y: 550, type: 'boundary_corner' as const, id: 'GT-004' },
+    { x: 530, y: 560, type: 'monument' as const, id: 'GT-005' },
+    { x: 740, y: 550, type: 'boundary_corner' as const, id: 'GT-006' },
+    { x: 380, y: 720, type: 'control_benchmark' as const, id: 'GT-007' },
+    { x: 620, y: 720, type: 'monument' as const, id: 'GT-008' },
+    { x: 840, y: 720, type: 'boundary_corner' as const, id: 'GT-009' },
+  ];
+
+  return positions.map(p => {
+    const lat = baseLat + (0.5 - p.y / 1000) * LAT_SPAN;
+    const lng = baseLng + (p.x / 1000 - 0.5) * LNG_SPAN;
+    return {
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      latitude: Math.round(lat * 100000) / 100000,
+      longitude: Math.round(lng * 100000) / 100000,
+      type: p.type,
+      verifiedBy: 'Ground Truth RTK Field Crew',
+    };
+  });
+}
+
 export function generateTopologyIssues(parcels: Parcel[]): TopologyIssue[] {
   return [
     {
@@ -503,7 +560,7 @@ export function generateNotifications(): AppNotification[] {
   return [
     { id: 'N1', type: 'warning', title: 'Review Required', message: '126 parcel boundaries flagged for verification in Chennai Ward 42.', time: '5 min ago', read: false },
     { id: 'N2', type: 'error', title: 'Topology Conflict', message: 'Overlap detected in TN-CHN-W42-000115.', time: '23 min ago', read: false },
-    { id: 'N3', type: 'success', title: 'AI Extraction Ready', message: 'LAND-AI Model v2.1 feature extraction completed with 94% accuracy.', time: '1 hour ago', read: false },
+    { id: 'N3', type: 'success', title: 'AI Extraction Ready', message: 'CadastraAI Model v2.1 feature extraction completed with 94% accuracy.', time: '1 hour ago', read: false },
     { id: 'N4', type: 'info', title: 'Dataset Uploaded', message: 'Orthomosaic (0.1m GSD) and DSM layers loaded successfully.', time: '2 hours ago', read: true },
   ];
 }

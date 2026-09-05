@@ -2,7 +2,7 @@ import { useApp } from '@/context/AppContext';
 import type { PageId } from '@/types';
 import {
   LayoutDashboard, FolderKanban, PlusCircle, Map, AlertTriangle,
-  ClipboardCheck, GitBranch, FileText, Settings, LogOut, MapPin,
+  ClipboardCheck, GitBranch, FileText, Settings, LogOut, MapPin, Layers,
 } from 'lucide-react';
 
 const NAV_ITEMS: { id: PageId; label: string; icon: typeof LayoutDashboard }[] = [
@@ -10,6 +10,7 @@ const NAV_ITEMS: { id: PageId; label: string; icon: typeof LayoutDashboard }[] =
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'new-survey', label: 'New Survey', icon: PlusCircle },
   { id: 'cadastral-map', label: 'Cadastral Map', icon: Map },
+  { id: 'outputs', label: 'Platform Outputs', icon: Layers },
   { id: 'conflicts', label: 'Conflicts', icon: AlertTriangle },
   { id: 'field-verification', label: 'Field Verification', icon: ClipboardCheck },
   { id: 'topology', label: 'Topology', icon: GitBranch },

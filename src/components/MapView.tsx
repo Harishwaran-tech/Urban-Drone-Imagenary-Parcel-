@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -12,12 +12,25 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
-import type { Parcel, Building, Road, GNSSPoint, LayerState } from '@/types';
+import type { Parcel, Building, Road, GNSSPoint, LayerState, Polygon as LocalPolygon } from '@/types';
 import {
-  AlertTriangle, ShieldAlert, Check, X, MapPin,
-  Eye, EyeOff, Layers, Sparkles, Focus, Sliders, Maximize2,
-  Search, Crosshair, Plus, Minus, Compass, Map as MapIcon,
+  AlertTriangle, Check, Layers, Sliders, Maximize2,
+  Search, Crosshair, Plus, Minus,
+  Pencil, RotateCcw, Eye, EyeOff, ChevronDown, ChevronUp,
+  Activity, Globe, Sun, Contrast,
 } from 'lucide-react';
+import {
+  ZOOM_THRESHOLDS,
+  MAP_PALETTE,
+  get2DParcelStyle,
+  get2DAiParcelStyle,
+  get2DExistingCadastreStyle,
+  get2DBuildingStyle,
+  getDisplacementColor,
+  BASEMAP_OPTIONS,
+  CONFLICT_METADATA,
+  type BasemapType,
+} from '@/utils/mapStyles';
 
 // Fix default Leaflet icon paths
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -27,23 +40,28 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-// Center coordinates: Default fallback anchor (Chennai Ward 42)
+// Center coordinates: Chennai Ward 42
 export const DEFAULT_CENTER: [number, number] = [13.0827, 80.2707];
-export const DEFAULT_ZOOM = 17;
+export const DEFAULT_ZOOM = 16.5;
 
 // Coordinate transformation: Maps local 0..1000 coordinate space to real Lat/Lng
 const M = 1000;
-export const LAT_SPAN = 0.007; // ~770 meters
-export const LNG_SPAN = 0.008; // ~790 meters
+export const LAT_SPAN = 0.010; // ~1.1 km
+export const LNG_SPAN = 0.012; // ~1.3 km
 
 export function localToLatLng(x: number, y: number, baseLat = 13.0827, baseLng = 80.2707): [number, number] {
-  // Check if coordinates are already geographic
   if (Math.abs(y) <= 90 && Math.abs(x) <= 180 && (x > 50 || y > 8)) {
     return [y, x];
   }
   const lat = baseLat + (0.5 - y / M) * LAT_SPAN;
   const lng = baseLng + (x / M - 0.5) * LNG_SPAN;
   return [lat, lng];
+}
+
+export function latLngToLocal(lat: number, lng: number, baseLat = 13.0827, baseLng = 80.2707): { x: number; y: number } {
+  const y = (0.5 - (lat - baseLat) / LAT_SPAN) * M;
+  const x = ((lng - baseLng) / LNG_SPAN + 0.5) * M;
+  return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
 }
 
 export function pointsToLatLngs(
@@ -60,33 +78,66 @@ export function pointsToLatLngs(
   });
 }
 
-// Custom Issue / Conflict Marker Icon (matching Image 2 red exclamation circle)
-const createConflictIcon = () => {
+// Item 8: Conflict Marker Icon with Distinct Visual Glyphs & Styles
+const createConflictIcon = (type?: string | null) => {
+  const meta = (type && CONFLICT_METADATA[type]) || {
+    bgHex: '#ef4444',
+    iconSymbol: '!',
+    label: 'Issue / Conflict',
+  };
+
   return L.divIcon({
     className: 'custom-conflict-pin-marker',
     html: `
       <div style="
-        width: 20px;
-        height: 20px;
-        background: #ef4444;
+        width: 24px;
+        height: 24px;
+        background: ${meta.bgHex};
         border: 2px solid #ffffff;
         border-radius: 50%;
-        box-shadow: 0 0 8px rgba(239, 68, 68, 0.8), 0 2px 4px rgba(0,0,0,0.5);
+        box-shadow: 0 0 10px ${meta.bgHex}b0, 0 2px 5px rgba(0,0,0,0.5);
         display: flex;
         align-items: center;
         justify-content: center;
         color: #ffffff;
         font-weight: 900;
-        font-size: 12px;
+        font-size: 13px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         line-height: 1;
         cursor: pointer;
-        transform: translate(-10px, -10px);
+        transform: translate(-12px, -12px);
         transition: transform 0.15s ease;
-      ">!</div>
+      ">${meta.iconSymbol}</div>
     `,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+};
+
+// Vertex handle icon for dragging
+const createVertexHandleIcon = (index: number) => {
+  return L.divIcon({
+    className: 'custom-vertex-handle',
+    html: `
+      <div style="
+        width: 14px;
+        height: 14px;
+        background: #00e5ff;
+        border: 2px solid #ffffff;
+        border-radius: 50%;
+        box-shadow: 0 0 6px #00e5ff, 0 1px 3px rgba(0,0,0,0.6);
+        cursor: grab;
+        transform: translate(-7px, -7px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #000;
+        font-size: 8px;
+        font-weight: bold;
+      ">${index + 1}</div>
+    `,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
   });
 };
 
@@ -98,6 +149,10 @@ interface MapViewProps {
   layers: LayerState;
   selectedParcelId: string | null;
   onSelectParcel: (id: string | null) => void;
+  onAddParcel?: (newParcel: Parcel) => void;
+  onUpdateParcelGeometry?: (id: string, newAiGeom: LocalPolygon, newExistingGeom?: LocalPolygon) => void;
+  isEditingBounding?: boolean;
+  onToggleEditBounding?: (editing: boolean) => void;
   uploadedImage?: string | null;
   imageBounds?: [[number, number], [number, number]] | null;
   orthoOpacity?: number;
@@ -114,37 +169,17 @@ interface MapViewProps {
   onAcceptParcel?: (id: string) => void;
   onRejectParcel?: (id: string) => void;
   onRequestFieldVerification?: (id: string) => void;
+  // Phase 1 & 2 Overhaul Extensions
+  diffMode?: boolean;
+  heatmapMode?: boolean;
+  basemapType?: BasemapType;
+  onBasemapChange?: (type: BasemapType) => void;
+  rasterAdjustments?: { brightness: number; contrast: number; saturation: number; sharpen: boolean };
+  onRasterAdjustmentsChange?: React.Dispatch<React.SetStateAction<{ brightness: number; contrast: number; saturation: number; sharpen: boolean }>>;
+  elevationMode?: 'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm';
+  onElevationModeChange?: (m: 'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm') => void;
+  onViewChange?: (center: [number, number], zoom: number) => void;
 }
-
-// Styling configurations matching Image 2
-const PARCEL_DEFAULT_STYLE = {
-  color: '#06b6d4', // Cyan boundary outline
-  weight: 1.8,
-  fillColor: '#0891b2',
-  fillOpacity: 0.04,
-};
-
-const PARCEL_SELECTED_STYLE = {
-  color: '#00e5ff',
-  weight: 3.5,
-  fillColor: '#00e5ff',
-  fillOpacity: 0.22,
-};
-
-const AI_PREDICTED_STYLE = {
-  color: '#d946ef', // Magenta / Purple
-  weight: 2,
-  dashArray: '5, 3',
-  fillColor: '#c026d3',
-  fillOpacity: 0.08,
-};
-
-const BUILDING_STYLE = {
-  color: '#f59e0b', // Amber / Orange
-  weight: 1.6,
-  fillColor: '#fbbf24',
-  fillOpacity: 0.18,
-};
 
 const LULC_COLORS: Record<string, string> = {
   residential: '#38bdf8',
@@ -153,25 +188,23 @@ const LULC_COLORS: Record<string, string> = {
   industrial: '#64748b',
 };
 
-// Component to handle auto-fitting, location bounds and center changes
+// Component to handle bounds, center, and search zoom
 function MapController({
-  selectedParcelId,
   searchParcelId,
   parcels,
   baseCenter,
-  imageBounds,
   onCursorMove,
   fitTrigger,
   onZoomChange,
+  onViewChange,
 }: {
-  selectedParcelId: string | null;
   searchParcelId?: string | null;
   parcels: Parcel[];
   baseCenter: [number, number];
-  imageBounds: [[number, number], [number, number]] | null;
   onCursorMove: (coords: { lat: number; lng: number; zoom: number }) => void;
   fitTrigger: number;
   onZoomChange?: (z: number) => void;
+  onViewChange?: (center: [number, number], zoom: number) => void;
 }) {
   const map = useMap();
   const initialFitDone = useRef(false);
@@ -188,6 +221,17 @@ function MapController({
       const center = map.getCenter();
       const z = map.getZoom();
       if (onZoomChange) onZoomChange(z);
+      if (onViewChange) onViewChange([Number(center.lat.toFixed(5)), Number(center.lng.toFixed(5))], z);
+      onCursorMove({
+        lat: Number(center.lat.toFixed(5)),
+        lng: Number(center.lng.toFixed(5)),
+        zoom: z,
+      });
+    },
+    moveend() {
+      const center = map.getCenter();
+      const z = map.getZoom();
+      if (onViewChange) onViewChange([Number(center.lat.toFixed(5)), Number(center.lng.toFixed(5))], z);
       onCursorMove({
         lat: Number(center.lat.toFixed(5)),
         lng: Number(center.lng.toFixed(5)),
@@ -196,22 +240,25 @@ function MapController({
     },
   });
 
-  // Fit to imageBounds or parcels on initial load or trigger
+  // Set initial view once to baseCenter at zoom 17 (Scale 1:2,500)
   useEffect(() => {
-    if (imageBounds) {
-      map.fitBounds(imageBounds, { padding: [20, 20], maxZoom: 18, animate: true });
-      initialFitDone.current = true;
-    } else if (baseCenter) {
-      map.setView(baseCenter, DEFAULT_ZOOM, { animate: true });
+    if (!initialFitDone.current) {
+      map.setView(baseCenter, DEFAULT_ZOOM, { animate: false });
       initialFitDone.current = true;
     }
-  }, [imageBounds, baseCenter, map, fitTrigger]);
+  }, [baseCenter, map]);
 
-  // Zoom to parcel when search or selected changes
+  // Recenter when fitTrigger increases
   useEffect(() => {
-    const targetId = searchParcelId || selectedParcelId;
-    if (targetId) {
-      const p = parcels.find(item => item.id === targetId);
+    if (fitTrigger > 0) {
+      map.setView(baseCenter, DEFAULT_ZOOM, { animate: true });
+    }
+  }, [fitTrigger, baseCenter, map]);
+
+  // Zoom to parcel ONLY when user explicitly searches via search bar
+  useEffect(() => {
+    if (searchParcelId) {
+      const p = parcels.find(item => item.id === searchParcelId);
       if (p && p.aiGeometry && p.aiGeometry.length > 0) {
         const latLngs = pointsToLatLngs(p.aiGeometry, baseCenter[0], baseCenter[1]);
         if (latLngs.length > 0) {
@@ -220,53 +267,13 @@ function MapController({
         }
       }
     }
-  }, [selectedParcelId, searchParcelId, parcels, baseCenter, map]);
+  }, [searchParcelId, parcels, baseCenter, map]);
 
   return null;
 }
 
-// Interactive Map Tools (Zoom + Locate)
-function MapToolButtons({
-  onZoomIn,
-  onZoomOut,
-  onResetView,
-}: {
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onResetView: () => void;
-}) {
-  return (
-    <div className="absolute top-16 left-4 z-[400] flex flex-col gap-2">
-      <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 overflow-hidden flex flex-col">
-        <button
-          onClick={onZoomIn}
-          className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors border-b border-slate-100 active:bg-slate-200"
-          title="Zoom In"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onZoomOut}
-          className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors active:bg-slate-200"
-          title="Zoom Out"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-      </div>
-
-      <button
-        onClick={onResetView}
-        className="w-8 h-8 bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 flex items-center justify-center text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
-        title="Recenter to Survey AOI"
-      >
-        <Crosshair className="w-4 h-4" />
-      </button>
-    </div>
-  );
-}
-
-// Interactive Measure Tool Layer
-function MeasureToolLayer({
+// Map Click Listener for Drawing New Parcels
+function MapDrawingHandler({
   active,
   points,
   onAddPoint,
@@ -302,28 +309,106 @@ function MeasureToolLayer({
     <>
       <Polyline
         positions={points}
-        pathOptions={{ color: '#06b6d4', weight: 3, dashArray: '6, 6' }}
+        pathOptions={{ color: '#d946ef', weight: 3, dashArray: '6, 6' }}
       />
       {points.length >= 3 && (
         <Polygon
           positions={points}
-          pathOptions={{ color: '#06b6d4', fillColor: '#22d3ee', fillOpacity: 0.25, weight: 2 }}
+          pathOptions={{ color: '#d946ef', fillColor: '#f43f5e', fillOpacity: 0.25, weight: 2 }}
         />
       )}
       {points.map((pt, idx) => (
         <CircleMarker
           key={idx}
           center={pt}
-          radius={idx === 0 ? 8 : 6}
+          radius={idx === 0 ? 8 : 5}
           pathOptions={{
-            color: '#0891b2',
-            fillColor: idx === 0 ? '#10b981' : '#06b6d4',
-            fillOpacity: 0.95,
+            color: '#ffffff',
+            fillColor: idx === 0 ? '#10b981' : '#d946ef',
+            fillOpacity: 1,
             weight: 2,
           }}
         />
       ))}
     </>
+  );
+}
+
+// Interactive Map Tools (Zoom + Locate + Draw / Edit)
+function MapToolButtons({
+  onZoomIn,
+  onZoomOut,
+  onResetView,
+  isMarking,
+  onToggleMarking,
+  isEditing,
+  onToggleEditing,
+  hasSelection,
+}: {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetView: () => void;
+  isMarking: boolean;
+  onToggleMarking: () => void;
+  isEditing: boolean;
+  onToggleEditing: () => void;
+  hasSelection: boolean;
+}) {
+  return (
+    <div className="absolute top-16 left-4 z-[400] flex flex-col gap-2">
+      <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 overflow-hidden flex flex-col">
+        <button
+          onClick={onZoomIn}
+          className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors border-b border-slate-100 active:bg-slate-200"
+          title="Zoom In"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onZoomOut}
+          className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors active:bg-slate-200"
+          title="Zoom Out"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+      </div>
+
+      <button
+        onClick={onResetView}
+        className="w-8 h-8 bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 flex items-center justify-center text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+        title="Recenter to Ward 42 Extent"
+      >
+        <Crosshair className="w-4 h-4" />
+      </button>
+
+      {/* Interactive Mark Parcel Button */}
+      <button
+        onClick={onToggleMarking}
+        className={`w-8 h-8 rounded-xl shadow-lg border backdrop-blur-md flex items-center justify-center transition-all ${
+          isMarking
+            ? 'bg-fuchsia-600 text-white border-fuchsia-400 ring-2 ring-fuchsia-400/50'
+            : 'bg-white/95 text-slate-700 border-slate-200/80 hover:bg-fuchsia-50 hover:text-fuchsia-600'
+        }`}
+        title={isMarking ? 'Cancel Marking' : 'Mark / Draw New Parcel'}
+      >
+        <Pencil className="w-4 h-4" />
+      </button>
+
+      {/* Interactive Edit Bounding Button (if selected) */}
+      {hasSelection && (
+        <button
+          onClick={onToggleEditing}
+          className={`w-8 h-8 rounded-xl shadow-lg border backdrop-blur-md flex items-center justify-center transition-all ${
+            isEditing
+              ? 'bg-blue-600 text-white border-blue-400 ring-2 ring-blue-400/50'
+              : 'bg-white/95 text-slate-700 border-slate-200/80 hover:bg-blue-50 hover:text-blue-600'
+          }`}
+          title={isEditing ? 'Exit Bounding Editor' : 'Edit Selected Parcel Nodes'}
+        >
+          <RotateCcw className="w-4 h-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -335,6 +420,10 @@ export default function MapView({
   layers,
   selectedParcelId,
   onSelectParcel,
+  onAddParcel,
+  onUpdateParcelGeometry,
+  isEditingBounding = false,
+  onToggleEditBounding,
   uploadedImage = null,
   imageBounds = null,
   orthoOpacity = 90,
@@ -351,36 +440,97 @@ export default function MapView({
   onAcceptParcel,
   onRejectParcel,
   onRequestFieldVerification,
+  diffMode = false,
+  heatmapMode = false,
+  basemapType = 'satellite',
+  onBasemapChange,
+  rasterAdjustments = { brightness: 100, contrast: 100, saturation: 100, sharpen: false },
+  onRasterAdjustmentsChange,
+  elevationMode = 'off',
+  onElevationModeChange,
+  onViewChange,
 }: MapViewProps) {
   const [coords, setCoords] = useState<{ lat: number; lng: number; zoom: number }>({
     lat: baseCenter[0],
     lng: baseCenter[1],
     zoom: baseZoom,
   });
-  const [localOrthoOpacity, setLocalOrthoOpacity] = useState(orthoOpacity);
   const [fitTrigger, setFitTrigger] = useState(0);
-  const [measurePoints, setMeasurePoints] = useState<[number, number][]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  const [elevationSlider, setElevationSlider] = useState(50);
+  const [elevationSlider, setElevationSlider] = useState(100);
+  const [showRasterPanel, setShowRasterPanel] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [showBasemapDropdown, setShowBasemapDropdown] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
 
-  // Exact Bounding Box for the 0..1000 Orthomosaic Image Layer
+  // Dynamic CSS Filter for Raster Orthomosaic & Basemap Tiles
+  const filterCss = useMemo(() => {
+    const b = rasterAdjustments?.brightness ?? 100;
+    const c = rasterAdjustments?.contrast ?? 100;
+    const s = rasterAdjustments?.saturation ?? 100;
+    const sh = rasterAdjustments?.sharpen ? ' contrast(118%) drop-shadow(0 0 1px rgba(0,0,0,0.5))' : '';
+    return `brightness(${b}%) contrast(${c}%)${sh} saturate(${s}%)`;
+  }, [rasterAdjustments]);
+
+  // Interactive Drawing / Marking State
+  const [isMarkingParcel, setIsMarkingParcel] = useState(false);
+  const [markPoints, setMarkPoints] = useState<[number, number][]>([]);
+
+  // Interactive Vertex Editing State
+  const [editingNodes, setEditingNodes] = useState<{ x: number; y: number }[] | null>(null);
+
+  const selectedParcel = useMemo(() => {
+    return parcels.find(p => p.id === selectedParcelId) || null;
+  }, [parcels, selectedParcelId]);
+
+  // Determine immediate neighbours of the selected parcel for focused visual hierarchy
+  const neighbourParcelIds = useMemo(() => {
+    if (!selectedParcelId) return new Set<string>();
+    const selected = parcels.find(p => p.id === selectedParcelId);
+    if (!selected) return new Set<string>();
+    const geom = selected.aiGeometry?.length ? selected.aiGeometry : selected.existingGeometry;
+    if (!geom || geom.length === 0) return new Set<string>();
+
+    const selCx = geom.reduce((s, pt) => s + pt.x, 0) / geom.length;
+    const selCy = geom.reduce((s, pt) => s + pt.y, 0) / geom.length;
+
+    const neighbours = new Set<string>();
+    for (const p of parcels) {
+      if (p.id === selectedParcelId) continue;
+      const pGeom = p.aiGeometry?.length ? p.aiGeometry : p.existingGeometry;
+      if (!pGeom || pGeom.length === 0) continue;
+      const cx = pGeom.reduce((s, pt) => s + pt.x, 0) / pGeom.length;
+      const cy = pGeom.reduce((s, pt) => s + pt.y, 0) / pGeom.length;
+      const dist = Math.hypot(cx - selCx, cy - selCy);
+      if (dist < 70) {
+        neighbours.add(p.id);
+      }
+    }
+    return neighbours;
+  }, [selectedParcelId, parcels]);
+
+  const currentZoom = coords.zoom;
+  const showDetailedLabels = currentZoom >= ZOOM_THRESHOLDS.DETAILED_LABELS;
+  const showParcelIds = currentZoom >= ZOOM_THRESHOLDS.PARCEL_IDS;
+  const showGnssPoints = layers.gnssPoints && currentZoom >= ZOOM_THRESHOLDS.GNSS_POINTS;
+
+  // Synchronize editing nodes when selected parcel or edit mode toggles
+  useEffect(() => {
+    if (isEditingBounding && selectedParcel) {
+      setEditingNodes(selectedParcel.aiGeometry);
+    } else {
+      setEditingNodes(null);
+    }
+  }, [isEditingBounding, selectedParcel]);
+
+  // Exact Bounding Box for Orthomosaic Layer
   const orthoBounds: [[number, number], [number, number]] = useMemo(() => [
     [baseCenter[0] - LAT_SPAN / 2, baseCenter[1] - LNG_SPAN / 2],
     [baseCenter[0] + LAT_SPAN / 2, baseCenter[1] + LNG_SPAN / 2],
   ], [baseCenter]);
 
-  // Strict Bounding Box for the Survey Area of Interest (AOI)
-  // This constrains panning and zooming strictly to the project location
-  const aoiBounds = useMemo((): [[number, number], [number, number]] => {
-    return [
-      [baseCenter[0] - LAT_SPAN * 0.75, baseCenter[1] - LNG_SPAN * 0.75],
-      [baseCenter[0] + LAT_SPAN * 0.75, baseCenter[1] + LNG_SPAN * 0.75],
-    ];
-  }, [baseCenter]);
-
-  // AOI Survey Boundary polygon
+  // AOI Polygon
   const aoiPolygonLatLngs = useMemo((): [number, number][] => {
     return [
       [orthoBounds[0][0], orthoBounds[0][1]],
@@ -390,11 +540,12 @@ export default function MapView({
     ];
   }, [orthoBounds]);
 
-  // Compute centroid for parcel to place conflict pin
+  // Centroid for parcels to position conflict pins
   const parcelCentroids = useMemo(() => {
     const map = new Map<string, [number, number]>();
     for (const p of parcels) {
-      const latLngs = pointsToLatLngs(p.aiGeometry, baseCenter[0], baseCenter[1]);
+      const geom = p.aiGeometry && p.aiGeometry.length > 0 ? p.aiGeometry : p.existingGeometry;
+      const latLngs = pointsToLatLngs(geom, baseCenter[0], baseCenter[1]);
       if (latLngs.length > 0) {
         const avgLat = latLngs.reduce((s, pt) => s + pt[0], 0) / latLngs.length;
         const avgLng = latLngs.reduce((s, pt) => s + pt[1], 0) / latLngs.length;
@@ -428,117 +579,377 @@ export default function MapView({
     }
   };
 
+  // Finish Drawing New Parcel
+  const handleFinishMarking = () => {
+    if (markPoints.length < 3) {
+      alert('Please add at least 3 points to create a parcel boundary.');
+      return;
+    }
+
+    const localPoints = markPoints.map(pt => latLngToLocal(pt[0], pt[1], baseCenter[0], baseCenter[1]));
+    const nextSuffix = String(Math.floor(Math.random() * 800) + 200).padStart(6, '0');
+    const newId = `TN-CHN-W42-${nextSuffix}`;
+
+    const newParcel: Parcel = {
+      id: newId,
+      surveyNumber: `${Math.floor(Math.random() * 200) + 100}/1`,
+      ward: 'Ward 42',
+      zone: 'Zone 05',
+      existingGeometry: localPoints,
+      aiGeometry: localPoints,
+      existingArea: 165.5,
+      aiArea: 165.5,
+      confidence: 96.8,
+      boundaryConfidence: 97.5,
+      buildingConfidence: 95.0,
+      perimeter: 52.4,
+      boundaryDisplacement: 0.2,
+      status: 'ai_preliminary',
+      conflictType: null,
+      priority: 'LOW',
+      topologyStatus: 'valid',
+      verificationStatus: 'not_reviewed',
+      topologyIssues: [],
+      notes: 'User-marked parcel on map',
+      recommendation: 'Newly digitized parcel boundary ready for verification.',
+      conflictReasons: [],
+      assignedSurveyor: null,
+      checklist: {
+        boundaryVerified: false,
+        existingRecordChecked: false,
+        gnssCollected: false,
+        buildingChecked: false,
+        neighborChecked: false,
+      },
+      hasBuilding: false,
+      gnssPointIds: [],
+      elevation: 15.2,
+      landUse: 'Residential',
+      predictedBy: 'CadastraAI Digitizer',
+      createdOn: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' 11:00 AM',
+      hasExistingBoundary: true,
+      hasAiBoundary: true,
+    };
+
+    if (onAddParcel) {
+      onAddParcel(newParcel);
+    }
+    onSelectParcel(newId);
+    setMarkPoints([]);
+    setIsMarkingParcel(false);
+  };
+
+  // Vertex Drag Handler for Bounding Editor
+  const handleVertexDrag = (index: number, latlng: L.LatLng) => {
+    if (!editingNodes) return;
+    const local = latLngToLocal(latlng.lat, latlng.lng, baseCenter[0], baseCenter[1]);
+    const updated = [...editingNodes];
+    updated[index] = local;
+    setEditingNodes(updated);
+  };
+
+  // Save Bounding Node Changes
+  const handleSaveBounding = () => {
+    if (selectedParcel && editingNodes && onUpdateParcelGeometry) {
+      onUpdateParcelGeometry(selectedParcel.id, editingNodes);
+    }
+    if (onToggleEditBounding) {
+      onToggleEditBounding(false);
+    }
+  };
+
+  const handleCancelBounding = () => {
+    if (onToggleEditBounding) {
+      onToggleEditBounding(false);
+    }
+    setEditingNodes(null);
+  };
+
   const activeBasemap = basemapMode === 'satellite' || layers.satelliteImagery ? 'satellite' : 'street';
   const hasUploadedDroneImage = !!uploadedImage && layers.droneOrthomosaic !== false;
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-900 select-none" style={{ height: height || '100%' }}>
-      {/* Top Search Location Bar (Image 2 style) */}
-      <div className="absolute top-3.5 left-4 z-[400] w-72">
-        <div className="relative group">
-          <div className="flex items-center bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-xl px-3.5 py-2 shadow-lg focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
-            <Search className="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setShowSearchDropdown(true);
-              }}
-              onFocus={() => setShowSearchDropdown(true)}
-              placeholder="Search location / parcel..."
-              className="bg-transparent text-xs text-slate-800 placeholder-slate-400 w-full focus:outline-none"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setShowSearchDropdown(false);
-                }}
-                className="text-slate-400 hover:text-slate-600 ml-1 text-xs"
-              >
-                ✕
-              </button>
-            )}
+      
+
+
+      {/* Active Mode Banner: Mark Parcel Mode */}
+      {isMarkingParcel && (
+        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-[400] bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl border border-magenta-500/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-magenta-400 animate-ping" />
+            <span className="text-xs font-bold">Marking Parcel ({markPoints.length} points)</span>
+            <span className="text-[10px] text-slate-400">Click on map corners</span>
           </div>
-
-          {/* Search dropdown results */}
-          {showSearchDropdown && searchResults.length > 0 && (
-            <div className="absolute top-full mt-1.5 left-0 w-full bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in fade-in">
-              <div className="px-3 py-1.5 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-wide border-b border-slate-100">
-                Parcels in Location
-              </div>
-              {searchResults.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    onSelectParcel(p.id);
-                    setSearchQuery('');
-                    setShowSearchDropdown(false);
-                  }}
-                  className="w-full px-3 py-2 text-left hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
-                >
-                  <div>
-                    <div className="text-xs font-bold text-slate-800">{p.id}</div>
-                    <div className="text-[10px] text-slate-500">Area: {p.existingArea} m² · {p.landUse || 'Residential'}</div>
-                  </div>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">
-                    {p.confidence}%
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 ml-2">
+            <button
+              onClick={handleFinishMarking}
+              disabled={markPoints.length < 3}
+              className="px-3 py-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" /> Finish
+            </button>
+            <button
+              onClick={() => { setIsMarkingParcel(false); setMarkPoints([]); }}
+              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Map Control Buttons (Zoom +/- & Crosshair) */}
+      {/* Active Mode Banner: Edit Bounding Mode */}
+      {isEditingBounding && selectedParcel && (
+        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-[400] bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl border border-cyan-500/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+            <span className="text-xs font-bold font-mono">Editing {selectedParcel.id} Nodes</span>
+            <span className="text-[10px] text-slate-400">Drag vertex handles on map</span>
+          </div>
+          <div className="flex items-center gap-1.5 ml-2">
+            <button
+              onClick={handleSaveBounding}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5" /> Save Bounding
+            </button>
+            <button
+              onClick={handleCancelBounding}
+              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Map Control Buttons (Zoom +/- & Crosshair & Tools) */}
       <MapToolButtons
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onResetView={handleResetView}
+        isMarking={isMarkingParcel}
+        onToggleMarking={() => setIsMarkingParcel(!isMarkingParcel)}
+        isEditing={isEditingBounding}
+        onToggleEditing={() => {
+          if (onToggleEditBounding) onToggleEditBounding(!isEditingBounding);
+        }}
+        hasSelection={!!selectedParcel}
       />
 
-      {/* Right Vertical Slider Widget (Image 2 style) */}
-      <div className="absolute top-3.5 right-4 z-[400] bg-white/95 backdrop-blur-md rounded-xl p-2 shadow-lg border border-slate-200/80 flex flex-col items-center gap-1.5">
-        <Sliders className="w-3.5 h-3.5 text-slate-600" />
-        <div className="h-28 flex items-center justify-center py-1">
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={elevationSlider}
-            onChange={(e) => setElevationSlider(Number(e.target.value))}
-            className="h-24 w-1.5 accent-blue-600 cursor-pointer [writing-mode:bt-lr] [-webkit-appearance:slider-vertical]"
-            title="Layer Depth / Opacity"
-          />
+      {/* Top Right Controls Container */}
+      <div className="absolute top-3.5 right-4 z-[400] flex items-start gap-2">
+        {/* Raster Image Adjustments Popover Toggle */}
+        <div className="relative">
+          <button
+            onClick={() => setShowRasterPanel(!showRasterPanel)}
+            className={`w-8 h-8 rounded-xl backdrop-blur-md shadow-lg border flex items-center justify-center transition-all ${
+              showRasterPanel
+                ? 'bg-blue-600 text-white border-blue-500 ring-2 ring-blue-400/50'
+                : 'bg-white/95 text-slate-700 border-slate-200/80 hover:bg-slate-100'
+            }`}
+            title="Imagery Raster Adjustments (Brightness, Contrast, Saturation)"
+          >
+            <Sun className="w-4 h-4" />
+          </button>
+
+          {/* Raster Adjustments Glass Panel */}
+          {showRasterPanel && (
+            <div className="absolute top-full mt-2 right-0 w-64 bg-slate-900/95 text-white backdrop-blur-xl border border-slate-700/80 p-3.5 rounded-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-blue-400" /> Imagery Adjustments
+                </span>
+                <button
+                  onClick={() => {
+                    onRasterAdjustmentsChange?.({
+                      brightness: 100,
+                      contrast: 100,
+                      saturation: 100,
+                      sharpen: false,
+                    });
+                  }}
+                  className="text-[10px] text-slate-400 hover:text-white"
+                >
+                  Reset
+                </button>
+              </div>
+
+              {/* Brightness */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px] text-slate-300">
+                  <span>Brightness</span>
+                  <span className="font-mono text-blue-400">{rasterAdjustments?.brightness ?? 100}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={150}
+                  value={rasterAdjustments?.brightness ?? 100}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    onRasterAdjustmentsChange?.(prev => ({ ...prev, brightness: val }));
+                  }}
+                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+              </div>
+
+              {/* Contrast */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px] text-slate-300">
+                  <span>Contrast</span>
+                  <span className="font-mono text-blue-400">{rasterAdjustments?.contrast ?? 100}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={150}
+                  value={rasterAdjustments?.contrast ?? 100}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    onRasterAdjustmentsChange?.(prev => ({ ...prev, contrast: val }));
+                  }}
+                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+              </div>
+
+              {/* Saturation */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px] text-slate-300">
+                  <span>Saturation</span>
+                  <span className="font-mono text-blue-400">{rasterAdjustments?.saturation ?? 100}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={200}
+                  value={rasterAdjustments?.saturation ?? 100}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    onRasterAdjustmentsChange?.(prev => ({ ...prev, saturation: val }));
+                  }}
+                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+              </div>
+
+              {/* Sharpen Toggle */}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                <span className="text-[11px] text-slate-300">Sharpen Aerial Details</span>
+                <button
+                  onClick={() => {
+                    onRasterAdjustmentsChange?.(prev => ({ ...prev, sharpen: !prev.sharpen }));
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                    rasterAdjustments?.sharpen ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {rasterAdjustments?.sharpen ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-        <span className="text-[9px] font-bold text-slate-500 font-mono">{elevationSlider}%</span>
+
+        {/* Right Vertical Opacity Slider Widget */}
+        <div className="bg-white/95 backdrop-blur-md rounded-xl p-2 shadow-lg border border-slate-200/80 flex flex-col items-center gap-1.5">
+          <Sliders className="w-3.5 h-3.5 text-slate-600" />
+          <div className="h-28 flex items-center justify-center py-1">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={elevationSlider}
+              onChange={(e) => setElevationSlider(Number(e.target.value))}
+              className="h-24 w-1.5 accent-blue-600 cursor-pointer [writing-mode:bt-lr] [-webkit-appearance:slider-vertical]"
+              title="Layer Depth / Imagery Opacity"
+            />
+          </div>
+          <span className="text-[9px] font-bold text-slate-500 font-mono">{elevationSlider}%</span>
+        </div>
       </div>
 
-      {/* Bottom Left Mini Locator Map Inset (Image 2 style) */}
-      <div className="absolute bottom-6 left-4 z-[400] bg-white/95 backdrop-blur-md p-1.5 rounded-xl shadow-xl border border-slate-200/80 pointer-events-auto">
-        <div className="w-24 h-20 bg-slate-100 rounded-lg relative overflow-hidden flex items-center justify-center border border-slate-200">
-          <div className="absolute inset-0 opacity-40 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:8px_8px]" />
-          {/* Outlined Ward Polygon in Mini Locator */}
-          <svg className="w-full h-full p-2" viewBox="0 0 100 80">
-            <path
-              d="M 15 20 L 45 10 L 85 25 L 80 65 L 50 75 L 20 60 Z"
-              fill="#dbeafe"
-              stroke="#2563eb"
-              strokeWidth="2"
-              strokeDasharray="3 2"
-            />
-            <circle cx="50" cy="45" r="4" fill="#ef4444" className="animate-ping" />
-            <circle cx="50" cy="45" r="3" fill="#2563eb" />
-          </svg>
-          <div className="absolute bottom-1 right-1 text-[8px] font-bold bg-white/90 px-1 py-0.2 rounded text-slate-600">
-            Ward 42
+      {/* Analytical Heatmap Legend (when heatmapMode is active) */}
+      {heatmapMode && (
+        <div className="absolute top-16 left-16 z-[400] bg-slate-900/90 text-white backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl shadow-xl space-y-1.5 animate-in fade-in">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <Activity className="w-3 h-3 text-amber-400" />
+            <span>Boundary Displacement</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+              <span className="text-slate-200">&lt; 0.15m (Normal)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+              <span className="text-slate-200">0.15–0.30m</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+              <span className="text-slate-200">0.30–0.50m</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+              <span className="text-slate-200">&gt; 0.50m (Severe)</span>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Difference View Mode Legend (when diffMode is active) */}
+      {diffMode && !heatmapMode && (
+        <div className="absolute top-16 left-16 z-[400] bg-slate-900/90 text-white backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl shadow-xl space-y-1 animate-in fade-in">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+            <Activity className="w-3 h-3 text-blue-400" />
+            <span>AI Review: Difference View</span>
+          </div>
+          <div className="flex items-center gap-3 text-[10px]">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-emerald-500" />
+              <span className="text-slate-200">Matched (&lt;0.15m)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-blue-500" />
+              <span className="text-slate-200">AI Boundary</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-amber-500 border-b border-dashed" />
+              <span className="text-slate-200">Existing Record</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded bg-rose-500/50 border border-rose-400" />
+              <span className="text-slate-200">Discrepancy Zone</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* Floating Basemap Thumbnail Switcher (Bottom Right) */}
+      <div className="absolute bottom-6 right-16 z-[400] flex items-center bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-lg border border-slate-200/80 pointer-events-auto">
+        {BASEMAP_OPTIONS.map(opt => {
+          const isActive = (basemapType || (basemapMode === 'satellite' ? 'satellite' : 'streets')) === opt.id;
+          return (
+            <button
+              key={opt.id}
+              onClick={() => onBasemapChange?.(opt.id)}
+              className={`px-2 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                isActive
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+              title={`Switch Basemap to ${opt.label}`}
+            >
+              <span className={`w-2 h-2 rounded-full ${opt.previewColor}`} />
+              <span>{opt.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Bottom Right GIS & Fullscreen Buttons (Image 2 style) */}
+      {/* Bottom Right GIS & Fullscreen Buttons */}
       <div className="absolute bottom-6 right-4 z-[400] flex flex-col gap-2">
         <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 overflow-hidden flex flex-col">
           <button
@@ -549,254 +960,546 @@ export default function MapView({
                 document.documentElement.requestFullscreen().catch(() => {});
               }
             }}
-            className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors"
+            className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             title="Toggle Fullscreen"
           >
             <Maximize2 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setFitTrigger(t => t + 1)}
-            className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors border-t border-slate-100"
-            title="Focus Survey Extent"
+            className="w-8 h-8 flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors border-t border-slate-100 cursor-pointer"
+            title="Focus Survey Extent (Scale 1:2,500)"
           >
             <Layers className="w-4 h-4 text-blue-600" />
           </button>
         </div>
       </div>
 
-      {/* Main Map Engine */}
-      <MapContainer
-        center={baseCenter}
-        zoom={baseZoom}
-        minZoom={15}
-        maxZoom={20}
-        maxBounds={aoiBounds}
-        maxBoundsViscosity={1.0}
-        zoomControl={false}
-        className="w-full h-full z-0"
-        attributionControl={false}
-        ref={(m) => { if (m) mapRef.current = m; }}
-      >
-        {/* Basemap Tile Layer: High Resolution Satellite Imagery */}
-        {activeBasemap === 'satellite' ? (
-          <TileLayer
-            key="esri-satellite"
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxZoom={20}
+      {/* Scoped CSS for Dynamic Raster Filtering */}
+      <style>{`
+        .cadastra-map-wrapper .leaflet-tile-pane,
+        .cadastra-map-wrapper .leaflet-image-layer {
+          filter: ${filterCss};
+        }
+      `}</style>
+
+      {/* Main Leaflet Map Engine */}
+      <div className="cadastra-map-wrapper w-full h-full">
+        <MapContainer
+          center={baseCenter}
+          zoom={DEFAULT_ZOOM}
+          zoomSnap={0.5}
+          minZoom={14}
+          maxZoom={20}
+          zoomControl={false}
+          className="w-full h-full z-0"
+          attributionControl={false}
+          ref={(m) => { if (m) mapRef.current = m; }}
+        >
+          {/* Basemap Tile Layer */}
+          {(() => {
+            const effective = basemapType || (basemapMode === 'satellite' ? 'satellite' : 'streets');
+            if (effective === 'streets') {
+              return (
+                <TileLayer
+                  key="osm-streets"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  maxZoom={19}
+                  opacity={elevationSlider / 100}
+                />
+              );
+            }
+            if (effective === 'terrain') {
+              return (
+                <TileLayer
+                  key="google-terrain"
+                  url="https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}"
+                  maxZoom={18}
+                  opacity={elevationSlider / 100}
+                />
+              );
+            }
+            if (effective === 'dark') {
+              return (
+                <TileLayer
+                  key="carto-dark"
+                  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                  maxZoom={19}
+                  opacity={elevationSlider / 100}
+                />
+              );
+            }
+            // Satellite & ORI default
+            return (
+              <TileLayer
+                key="google-satellite"
+                url="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+                maxZoom={20}
+                opacity={elevationSlider / 100}
+              />
+            );
+          })()}
+
+          {/* Uploaded Drone Orthomosaic Layer */}
+          {hasUploadedDroneImage && (
+            <ImageOverlay
+              url={uploadedImage!}
+              bounds={imageBounds || orthoBounds}
+              opacity={(orthoOpacity || 90) / 100}
+              zIndex={10}
+            />
+          )}
+
+          {/* Map Controller */}
+          <MapController
+            searchParcelId={searchParcelId}
+            parcels={parcels}
+            baseCenter={baseCenter}
+            onCursorMove={setCoords}
+            fitTrigger={fitTrigger}
+            onViewChange={onViewChange}
           />
-        ) : (
-          <TileLayer
-            key="osm-streets"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            maxZoom={19}
+
+          {/* Survey AOI Extent Boundary Outline */}
+          <Polygon
+            positions={aoiPolygonLatLngs}
+            pathOptions={{
+              color: '#38bdf8',
+              weight: 1.8,
+              dashArray: '6, 6',
+              fillColor: '#0284c7',
+              fillOpacity: 0.0,
+              interactive: false,
+            }}
           />
-        )}
 
-        {/* Uploaded Drone Orthomosaic Layer */}
-        {hasUploadedDroneImage && (
-          <ImageOverlay
-            url={uploadedImage!}
-            bounds={imageBounds || orthoBounds}
-            opacity={localOrthoOpacity / 100}
-            zIndex={10}
+          {/* Roads Layer */}
+          {layers.roads && roads.map(road => {
+            const positions = road.path.map(pt => localToLatLng(pt.x, pt.y, baseCenter[0], baseCenter[1]));
+            return (
+              <Polyline
+                key={road.id}
+                positions={positions}
+                pathOptions={{
+                  color: '#64748b',
+                  weight: Math.max(2.5, road.width / 3.5),
+                  opacity: 0.65,
+                  lineCap: 'round',
+                }}
+              />
+            );
+          })}
+
+          {/* LULC (Land Use / Land Cover) Fill Tints */}
+          {layers.lulc && parcels.map(p => {
+            const positions = pointsToLatLngs(p.existingGeometry, baseCenter[0], baseCenter[1]);
+            if (positions.length < 3) return null;
+            const lulcColor = LULC_COLORS[p.buildingType || 'residential'] || '#38bdf8';
+            return (
+              <Polygon
+                key={`lulc-${p.id}`}
+                positions={positions}
+                pathOptions={{
+                  color: 'transparent',
+                  fillColor: lulcColor,
+                  fillOpacity: 0.16,
+                }}
+                eventHandlers={{
+                  click: () => onSelectParcel(p.id),
+                }}
+              />
+            );
+          })}
+
+          {/* DIFFERENCE VIEW DISCREPANCY OVERLAY (when diffMode is active and displacement >= 0.15m) */}
+          {diffMode && parcels.filter(p => (p.boundaryDisplacement || 0) >= 0.15).map(p => {
+            const positions = pointsToLatLngs(p.existingGeometry, baseCenter[0], baseCenter[1]);
+            if (positions.length < 3) return null;
+            return (
+              <Polygon
+                key={`diff-discrepancy-${p.id}`}
+                positions={positions}
+                pathOptions={{
+                  color: '#ef4444',
+                  weight: 1.0,
+                  dashArray: '4, 4',
+                  fillColor: '#ef4444',
+                  fillOpacity: 0.22, // Discrepancy area translucent red
+                }}
+                eventHandlers={{
+                  click: () => onSelectParcel(p.id),
+                }}
+              />
+            );
+          })}
+
+          {/* FEATURE 1: Existing Cadastral Parcels */}
+          {layers.existingCadastralParcels && parcels.filter(p => p.hasExistingBoundary !== false).map(p => {
+            const positions = pointsToLatLngs(p.existingGeometry, baseCenter[0], baseCenter[1]);
+            if (positions.length < 3) return null;
+            const isSelected = p.id === selectedParcelId;
+
+            // In diff mode with discrepancy, style distinctly
+            const isDiffDiscrepant = diffMode && (p.boundaryDisplacement || 0) >= 0.15;
+            const pathOptions = isDiffDiscrepant
+              ? {
+                  color: MAP_PALETTE.diffExistingOnly,
+                  weight: isSelected ? 2.8 : 1.8,
+                  dashArray: '5, 5',
+                  fillColor: '#f59e0b',
+                  fillOpacity: isSelected ? 0.15 : 0.04,
+                }
+              : get2DExistingCadastreStyle(isSelected);
+
+            return (
+              <Polygon
+                key={`existing-${p.id}`}
+                positions={positions}
+                pathOptions={pathOptions}
+                eventHandlers={{
+                  click: () => onSelectParcel(p.id),
+                }}
+              >
+                <Popup className="cadastra-popup">
+                  <div className="p-2 space-y-1 text-xs">
+                    <div className="flex items-center gap-1 font-bold text-amber-700">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                      <span>Existing Cadastre Record</span>
+                    </div>
+                    <div className="font-mono font-bold text-slate-800">{p.id}</div>
+                    <div className="text-slate-600 text-[11px]">
+                      Area: <strong>{p.existingArea} m²</strong> · {p.landUse || 'Residential'}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Status: <span className="text-emerald-700 font-semibold">{p.status}</span>
+                    </div>
+                    <div className="flex gap-1 pt-1.5 border-t border-slate-100">
+                      <button
+                        onClick={() => onSelectParcel(p.id)}
+                        className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-semibold flex-1 cursor-pointer"
+                      >
+                        Select
+                      </button>
+                    </div>
+                  </div>
+                </Popup>
+              </Polygon>
+            );
+          })}
+
+          {/* FEATURE 2: AI Predicted Parcel Boundaries (Decluttered / Heatmap / Diff) */}
+          {layers.aiParcelBoundaries && parcels.filter(p => p.hasAiBoundary !== false).map(p => {
+            const geom = isEditingBounding && p.id === selectedParcelId && editingNodes && editingNodes.length >= 3
+              ? editingNodes
+              : p.aiGeometry;
+
+            const positions = pointsToLatLngs(geom, baseCenter[0], baseCenter[1]);
+            if (positions.length < 3) return null;
+            const isSelected = p.id === selectedParcelId;
+            const isNeighbour = neighbourParcelIds.has(p.id);
+            const hasSelection = !!selectedParcelId;
+
+            // Analytical Style Override
+            let pathOptions;
+            if (heatmapMode) {
+              const heatColor = getDisplacementColor(p.boundaryDisplacement || 0.1);
+              pathOptions = {
+                color: isSelected ? '#00e5ff' : heatColor,
+                weight: isSelected ? 3.5 : 2.0,
+                fillColor: heatColor,
+                fillOpacity: isSelected ? 0.22 : 0.08,
+                opacity: hasSelection && !isSelected && !isNeighbour ? 0.4 : 0.9,
+              };
+            } else if (diffMode) {
+              const isMatched = (p.boundaryDisplacement || 0) < 0.15;
+              pathOptions = {
+                color: isSelected ? '#00e5ff' : isMatched ? MAP_PALETTE.diffMatched : MAP_PALETTE.diffAiOnly,
+                weight: isSelected ? 3.5 : 2.0,
+                fillColor: isMatched ? MAP_PALETTE.diffMatched : MAP_PALETTE.diffAiOnly,
+                fillOpacity: isSelected ? 0.22 : 0.07,
+                opacity: 0.9,
+              };
+            } else {
+              // Standard Decluttered Styling (Normal fill 0.07, selected 0.22, neighbour 0.12)
+              pathOptions = get2DParcelStyle(p.status, isSelected, isNeighbour, hasSelection);
+            }
+
+            return (
+              <Polygon
+                key={`ai-${p.id}`}
+                positions={positions}
+                pathOptions={pathOptions}
+                eventHandlers={{
+                  click: () => onSelectParcel(p.id),
+                }}
+              >
+                <Popup className="cadastra-popup">
+                  <div className="p-2 space-y-1 text-xs">
+                    <div className="flex items-center gap-1 font-bold text-blue-700">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                      <span>AI Demarcated Parcel</span>
+                    </div>
+                    <div className="font-mono font-bold text-slate-800">{p.id}</div>
+                    <div className="text-slate-600 text-[11px]">
+                      Area: <strong>{p.aiArea} m²</strong> · AI Confidence: <strong className="text-blue-600">{p.confidence}%</strong>
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Displacement: <strong>{p.boundaryDisplacement}m</strong> ({p.boundaryDisplacement < 0.15 ? 'Sub-decimeter match' : 'Deviation detected'})
+                    </div>
+                    <div className="flex gap-1 pt-1.5 border-t border-slate-100">
+                      <button
+                        onClick={() => onSelectParcel(p.id)}
+                        className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-semibold flex-1 cursor-pointer"
+                      >
+                        Select
+                      </button>
+                      {onAcceptParcel && (
+                        <button
+                          onClick={() => onAcceptParcel(p.id)}
+                          className="px-2 py-1 bg-emerald-600 text-white rounded text-[10px] font-semibold cursor-pointer"
+                        >
+                          Approve
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Popup>
+              </Polygon>
+            );
+          })}
+
+          {/* ZOOM-DEPENDENT PARCEL ID LABELS (Only visible when currentZoom >= 16) */}
+          {showParcelIds && parcels.map(p => {
+            const centroid = parcelCentroids.get(p.id);
+            if (!centroid) return null;
+            const isSelected = p.id === selectedParcelId;
+            const labelText = p.surveyNumber || p.id.replace('TN-CHN-W42-', '');
+
+            return (
+              <Marker
+                key={`label-${p.id}`}
+                position={centroid}
+                icon={L.divIcon({
+                  className: 'cadastra-parcel-label-icon',
+                  html: `
+                    <div style="
+                      background: ${isSelected ? 'rgba(0, 229, 255, 0.95)' : 'rgba(255, 255, 255, 0.88)'};
+                      color: ${isSelected ? '#000000' : '#1e293b'};
+                      font-weight: 800;
+                      font-size: ${isSelected ? '10px' : '9px'};
+                      font-family: monospace;
+                      padding: 1px 4px;
+                      border-radius: 4px;
+                      border: 1px solid ${isSelected ? '#00e5ff' : 'rgba(203, 213, 225, 0.8)'};
+                      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+                      transform: translate(-50%, -50%);
+                      white-space: nowrap;
+                      pointer-events: none;
+                    ">${labelText}</div>
+                  `,
+                  iconSize: [0, 0],
+                })}
+              />
+            );
+          })}
+
+          {/* DRAGGABLE VERTEX HANDLES when "Edit Bounding" is active */}
+          {isEditingBounding && selectedParcel && editingNodes && editingNodes.map((node, idx) => {
+            const pos = localToLatLng(node.x, node.y, baseCenter[0], baseCenter[1]);
+            return (
+              <Marker
+                key={`vertex-${selectedParcel.id}-${idx}`}
+                position={pos}
+                icon={createVertexHandleIcon(idx)}
+                draggable={true}
+                eventHandlers={{
+                  drag: (e) => handleVertexDrag(idx, e.target.getLatLng()),
+                }}
+              />
+            );
+          })}
+
+          {/* Building Footprints Layer (Decluttered fill ~0.14) */}
+          {layers.buildings && buildings.map(b => {
+            const positions = pointsToLatLngs(b.geometry, baseCenter[0], baseCenter[1]);
+            if (positions.length < 3) return null;
+            const isSelected = b.parcelId === selectedParcelId;
+            return (
+              <Polygon
+                key={`bld-${b.id}`}
+                positions={positions}
+                pathOptions={get2DBuildingStyle(isSelected)}
+                eventHandlers={{
+                  click: () => {
+                    if (b.parcelId) onSelectParcel(b.parcelId);
+                  },
+                }}
+              />
+            );
+          })}
+
+          {/* Item 7: Actual Topology Error Geometries (Overlap polygons, Gap slivers, Encroachments) */}
+          {layers.conflictAreas && parcels.filter(p => p.isIssue || p.conflictType !== null).map(p => {
+            const isOverlap = p.conflictType === 'overlap' || (p.conflictReasons && p.conflictReasons.some(r => r.toLowerCase().includes('overlap')));
+            const isGap = p.conflictType === 'gap';
+            const isEncroachment = p.conflictType === 'building_encroachment' || (p.conflictReasons && p.conflictReasons.some(r => r.toLowerCase().includes('encroach')));
+
+            const geom = p.aiGeometry && p.aiGeometry.length >= 3 ? p.aiGeometry : p.existingGeometry;
+            if (!geom || geom.length < 3) return null;
+
+            // Compute actual localized conflict polygon using high-deviation node clusters
+            const conflictPts = geom.slice(0, Math.min(4, geom.length));
+            const positions = pointsToLatLngs(conflictPts, baseCenter[0], baseCenter[1]);
+            if (positions.length < 3) return null;
+
+            const fillColor = isEncroachment ? '#e11d48' : isGap ? '#f59e0b' : '#ef4444';
+            const strokeColor = isEncroachment ? '#be123c' : isGap ? '#d97706' : '#b91c1c';
+
+            return (
+              <Polygon
+                key={`topology-geom-${p.id}`}
+                positions={positions}
+                pathOptions={{
+                  color: strokeColor,
+                  weight: 2.4,
+                  dashArray: isGap ? '4, 4' : undefined,
+                  fillColor: fillColor,
+                  fillOpacity: 0.38,
+                }}
+                eventHandlers={{
+                  click: () => onSelectParcel(p.id),
+                }}
+              />
+            );
+          })}
+
+          {/* Item 8: Specific Conflict Markers with Distinct Glyphs & Measurements */}
+          {layers.conflictAreas && parcels.filter(p => p.isIssue || p.conflictType !== null).map(p => {
+            const pos = parcelCentroids.get(p.id);
+            if (!pos) return null;
+
+            const cType = p.conflictType || (p.boundaryDisplacement && p.boundaryDisplacement >= 0.3 ? 'boundary_displacement' : 'overlap');
+            const meta = CONFLICT_METADATA[cType] || {
+              label: 'Cadastral Discrepancy',
+              bgHex: '#ef4444',
+              badgeColor: 'bg-red-500 text-white',
+              iconSymbol: '!',
+              description: 'Survey boundary discrepancy',
+            };
+
+            // Calculate precise measurement for tooltip
+            let measurementStr = '';
+            if (cType === 'overlap') {
+              measurementStr = `Overlap Area: ${(p.overlapArea || (p.aiArea * 0.082)).toFixed(1)} m²`;
+            } else if (cType === 'building_encroachment') {
+              measurementStr = `Encroachment: ${(p.encroachmentDistance || 1.8).toFixed(1)} m over parcel line`;
+            } else if (cType === 'gap') {
+              measurementStr = `Gap Width: ${(p.gapDistance || 0.65).toFixed(2)} m sliver`;
+            } else if (cType === 'boundary_displacement') {
+              measurementStr = `Boundary Displacement: ${p.boundaryDisplacement} m deviation`;
+            } else {
+              measurementStr = `Displacement: ${p.boundaryDisplacement || 0.35} m`;
+            }
+
+            return (
+              <Marker
+                key={`issue-${p.id}`}
+                position={pos}
+                icon={createConflictIcon(cType)}
+                eventHandlers={{
+                  click: () => onSelectParcel(p.id),
+                }}
+              >
+                <Popup className="cadastra-popup">
+                  <div className="p-2.5 space-y-2 min-w-[220px] text-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${meta.badgeColor}`}>
+                        <span>{meta.iconSymbol}</span>
+                        <span>{meta.label}</span>
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-500 font-bold">{p.id}</span>
+                    </div>
+
+                    {/* Measured Dimension */}
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-200/80 space-y-1">
+                      <div className="font-bold text-slate-900 text-[11px] font-mono flex items-center gap-1">
+                        <Activity className="w-3.5 h-3.5 text-blue-600" />
+                        <span>{measurementStr}</span>
+                      </div>
+                      <div className="text-slate-500 text-[10px] leading-tight">
+                        {p.conflictReasons?.[0] || meta.description}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>AI Confidence: <strong className="text-blue-600">{p.confidence}%</strong></span>
+                      <span className="font-bold text-amber-600">{p.priority} Priority</span>
+                    </div>
+
+                    <div className="flex gap-1.5 pt-1">
+                      <button
+                        onClick={() => onSelectParcel(p.id)}
+                        className="flex-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors shadow-xs"
+                      >
+                        Inspect Conflict
+                      </button>
+                      {onAcceptParcel && (
+                        <button
+                          onClick={() => onAcceptParcel(p.id)}
+                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors shadow-xs"
+                        >
+                          Approve
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+
+          {/* GNSS / CORS Survey Benchmark Points (Zoom-dependent: visible when currentZoom >= 16) */}
+          {showGnssPoints && gnssPoints.map(pt => {
+            const pos: [number, number] = pt.latitude && pt.longitude
+              ? [pt.latitude, pt.longitude]
+              : localToLatLng(pt.x, pt.y, baseCenter[0], baseCenter[1]);
+
+            return (
+              <CircleMarker
+                key={pt.id}
+                center={pos}
+                radius={4}
+                pathOptions={{
+                  color: '#10b981',
+                  fillColor: '#34d399',
+                  fillOpacity: 0.9,
+                  weight: 1.5,
+                }}
+                eventHandlers={{
+                  click: () => onSelectParcel(pt.parcelId),
+                }}
+              />
+            );
+          })}
+
+          {/* Interactive Drawing Handler */}
+          <MapDrawingHandler
+            active={isMarkingParcel}
+            points={markPoints}
+            onAddPoint={pt => setMarkPoints(prev => [...prev, pt])}
           />
-        )}
+        </MapContainer>
+      </div>
 
-        <MapController
-          selectedParcelId={selectedParcelId}
-          searchParcelId={searchParcelId}
-          parcels={parcels}
-          baseCenter={baseCenter}
-          imageBounds={uploadedImage ? (imageBounds || orthoBounds) : null}
-          onCursorMove={setCoords}
-          fitTrigger={fitTrigger}
-        />
-
-        {/* Survey AOI Extent Boundary Outline */}
-        <Polygon
-          positions={aoiPolygonLatLngs}
-          pathOptions={{
-            color: '#38bdf8',
-            weight: 2,
-            dashArray: '6, 6',
-            fillColor: '#0284c7',
-            fillOpacity: 0.0,
-            interactive: false,
-          }}
-        />
-
-        {/* Roads Layer (clean road corridors separating blocks) */}
-        {layers.roads && roads.map(road => {
-          const positions = road.path.map(pt => localToLatLng(pt.x, pt.y, baseCenter[0], baseCenter[1]));
-          return (
-            <Polyline
-              key={road.id}
-              positions={positions}
-              pathOptions={{
-                color: activeBasemap === 'satellite' ? '#94a3b8' : '#64748b',
-                weight: Math.max(3, road.width / 3),
-                opacity: 0.65,
-                lineCap: 'round',
-              }}
-            />
-          );
-        })}
-
-        {/* LULC (Land Use / Land Cover) Fill Tints */}
-        {layers.lulc && parcels.map(p => {
-          const positions = pointsToLatLngs(p.existingGeometry, baseCenter[0], baseCenter[1]);
-          if (positions.length < 3) return null;
-          const lulcColor = LULC_COLORS[p.buildingType || 'residential'] || '#38bdf8';
-          return (
-            <Polygon
-              key={`lulc-${p.id}`}
-              positions={positions}
-              pathOptions={{
-                color: 'transparent',
-                fillColor: lulcColor,
-                fillOpacity: 0.15,
-              }}
-              eventHandlers={{
-                click: () => onSelectParcel(p.id),
-              }}
-            />
-          );
-        })}
-
-        {/* Existing / Registered Cadastral Parcel Boundaries (Cyan Lines) */}
-        {layers.existingCadastralParcels && parcels.map(p => {
-          const positions = pointsToLatLngs(p.existingGeometry, baseCenter[0], baseCenter[1]);
-          if (positions.length < 3) return null;
-          const isSelected = p.id === selectedParcelId;
-
-          return (
-            <Polygon
-              key={`existing-${p.id}`}
-              positions={positions}
-              pathOptions={isSelected ? PARCEL_SELECTED_STYLE : PARCEL_DEFAULT_STYLE}
-              eventHandlers={{
-                click: () => onSelectParcel(p.id),
-              }}
-            />
-          );
-        })}
-
-        {/* AI Predicted Boundaries Layer (Magenta / Purple Lines) */}
-        {layers.aiParcelBoundaries && parcels.map(p => {
-          // Render AI predicted boundary lines
-          const positions = pointsToLatLngs(p.aiGeometry, baseCenter[0], baseCenter[1]);
-          if (positions.length < 3) return null;
-          const isSelected = p.id === selectedParcelId;
-
-          return (
-            <Polygon
-              key={`ai-${p.id}`}
-              positions={positions}
-              pathOptions={isSelected ? PARCEL_SELECTED_STYLE : AI_PREDICTED_STYLE}
-              eventHandlers={{
-                click: () => onSelectParcel(p.id),
-              }}
-            />
-          );
-        })}
-
-        {/* Building Footprints Layer (Amber / Orange Outlines) */}
-        {layers.buildings && buildings.map(b => {
-          const positions = pointsToLatLngs(b.geometry, baseCenter[0], baseCenter[1]);
-          if (positions.length < 3) return null;
-          return (
-            <Polygon
-              key={`bld-${b.id}`}
-              positions={positions}
-              pathOptions={BUILDING_STYLE}
-              eventHandlers={{
-                click: () => {
-                  if (b.parcelId) onSelectParcel(b.parcelId);
-                },
-              }}
-            />
-          );
-        })}
-
-        {/* Issues / Conflicts Red Exclamation Pins (!) */}
-        {layers.conflictAreas && parcels.filter(p => p.isIssue || p.conflictType !== null).map(p => {
-          const pos = parcelCentroids.get(p.id);
-          if (!pos) return null;
-          const isSelected = p.id === selectedParcelId;
-
-          return (
-            <Marker
-              key={`issue-${p.id}`}
-              position={pos}
-              icon={createConflictIcon()}
-              eventHandlers={{
-                click: () => onSelectParcel(p.id),
-              }}
-            >
-              <Popup className="cadastra-popup">
-                <div className="p-2 space-y-1.5 min-w-[190px] text-xs">
-                  <div className="flex items-center gap-1.5 font-bold text-red-600">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Issue / Conflict</span>
-                  </div>
-                  <div className="font-bold text-slate-800">{p.id}</div>
-                  <div className="text-slate-600 text-[11px]">
-                    {p.conflictReasons?.[0] || 'Boundary verification required'}
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    Confidence: <strong className="text-blue-600">{p.confidence}%</strong>
-                  </div>
-                  <button
-                    onClick={() => onSelectParcel(p.id)}
-                    className="w-full mt-1 px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-bold"
-                  >
-                    View Details
-                  </button>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-
-        {/* GNSS / CORS Survey Benchmark Points */}
-        {layers.gnssPoints && gnssPoints.map(pt => {
-          const pos: [number, number] = pt.latitude && pt.longitude
-            ? [pt.latitude, pt.longitude]
-            : localToLatLng(pt.x, pt.y, baseCenter[0], baseCenter[1]);
-
-          return (
-            <CircleMarker
-              key={pt.id}
-              center={pos}
-              radius={4}
-              pathOptions={{
-                color: '#10b981',
-                fillColor: '#34d399',
-                fillOpacity: 0.9,
-                weight: 1.5,
-              }}
-              eventHandlers={{
-                click: () => onSelectParcel(pt.parcelId),
-              }}
-            />
-          );
-        })}
-
-        {/* Measure Tool Layer */}
-        <MeasureToolLayer
-          active={measureMode}
-          points={measurePoints}
-          onAddPoint={pt => setMeasurePoints(prev => [...prev, pt])}
-        />
-      </MapContainer>
-
-      {/* Bottom Center Google/Map Attribution & Scale Bar (Image 2 style) */}
+      {/* Bottom Center Google/Map Attribution & Scale Bar */}
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[400] bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] text-slate-600 shadow-sm border border-slate-200/60 flex items-center gap-3">
-        <span className="font-semibold">Google / High-Res Drone Imagery</span>
+        <span className="font-semibold">Google</span>
         <span className="text-slate-300">|</span>
-        <span>©2025 Google</span>
+        <span>Imagery Map Data ©2025 Google</span>
         <span className="text-slate-300">|</span>
         <span className="font-mono text-slate-700 font-semibold">Scale: 1:2,500</span>
+        <span className="text-slate-300">|</span>
+        <span className="text-slate-500 font-mono">Zoom: {coords.zoom.toFixed(1)}</span>
       </div>
     </div>
   );

@@ -63,9 +63,11 @@ function geoJsonFeatureToParcel(feature: any, index: number): Parcel {
     : aiGeometry;
 
   const id = props.id || `P-${String(index + 1).padStart(5, '0')}`;
-  const confidence = Math.round(props.confidence || 85);
-  const aiArea = Math.round(props.aiArea || props.area || 220);
-  const existingArea = Math.round(props.existingArea || aiArea * 0.95);
+  const confidence = Math.round(props.confidence || 80);
+  const aiArea = Math.round(props.aiArea || props.area || 0);
+  const existingArea = props.existingArea !== undefined && props.existingArea !== null
+    ? Math.round(props.existingArea)
+    : null;
 
   const status: ParcelStatus = props.status || (confidence >= 85 ? 'ai_preliminary' : (confidence >= 70 ? 'requires_review' : 'field_verification'));
   const priority: Priority = props.priority || (confidence < 65 ? 'CRITICAL' : (confidence < 75 ? 'HIGH' : (confidence < 85 ? 'MEDIUM' : 'LOW')));
@@ -79,26 +81,26 @@ function geoJsonFeatureToParcel(feature: any, index: number): Parcel {
     zone: props.zone || 'Zone 04',
     existingGeometry,
     aiGeometry,
-    existingArea,
+    existingArea: existingArea ?? aiArea,
     aiArea,
     confidence,
-    boundaryConfidence: Math.max(0, Math.min(100, confidence + Math.floor(-5 + Math.random() * 10))),
-    buildingConfidence: Math.floor(75 + Math.random() * 23),
-    perimeter: Math.round(Math.sqrt(aiArea) * 4 * 10) / 10,
-    boundaryDisplacement: props.boundaryDisplacement || (conflictType ? 2.4 : 0.6),
+    boundaryConfidence: props.boundaryConfidence ? Math.round(props.boundaryConfidence) : confidence,
+    buildingConfidence: props.buildingConfidence ? Math.round(props.buildingConfidence) : Math.min(95, confidence + 2),
+    perimeter: Math.round(Math.sqrt(Math.max(1, aiArea)) * 4 * 10) / 10,
+    boundaryDisplacement: props.boundaryDisplacement || 0.0,
     status,
     conflictType,
     priority,
     topologyStatus: props.topologyStatus || (isInvalidTopology ? 'invalid' : 'valid'),
     verificationStatus: status === 'verified' ? 'verified' : (status === 'field_verification' ? 'field_verification_required' : 'not_reviewed'),
-    topologyIssues: props.topologyIssues || (isInvalidTopology ? ['Overlap with adjacent boundary'] : []),
+    topologyIssues: props.topologyIssues || (isInvalidTopology ? ['Boundary variance requires surveyor inspection'] : []),
     notes: props.notes || '',
-    recommendation: props.recommendation || (confidence < 70 ? 'Field verification required.' : 'Accept AI boundary.'),
-    conflictReasons: props.conflictReasons || (conflictType ? [`Boundary variance: ${props.boundaryDisplacement || 2.4}m`] : []),
-    assignedSurveyor: props.assignedSurveyor || (status === 'field_verification' ? 'Ravi Kumar' : null),
+    recommendation: props.recommendation || (confidence < 70 ? 'Field verification required.' : 'Accept preliminary AI boundary.'),
+    conflictReasons: props.conflictReasons || (conflictType ? [`Displacement: ${props.boundaryDisplacement || 0}m`] : []),
+    assignedSurveyor: props.assignedSurveyor || (status === 'field_verification' ? 'Authorized Surveyor' : null),
     checklist: {
       boundaryVerified: status === 'verified',
-      existingRecordChecked: status === 'verified',
+      existingRecordChecked: existingArea !== null,
       gnssCollected: false,
       buildingChecked: false,
       neighborChecked: status === 'verified',
@@ -118,11 +120,14 @@ function geoJsonFeatureToBuilding(feature: any, index: number): Building {
     lat: c[1],
   }));
 
+  const area = Math.round(props.area || 0);
+  const height = props.height ? Math.round(props.height * 10) / 10 : Math.round(Math.sqrt(Math.max(10, area)) * 0.42 * 10) / 10;
+
   return {
     id: props.id || `B-${String(index + 1).padStart(4, '0')}`,
     geometry: geom,
-    area: Math.round(props.area || 120),
-    height: Math.round((props.height || 6.5) * 10) / 10,
+    area,
+    height,
     parcelId: props.parcelId || null,
     type: props.type || 'Residential',
   };
@@ -133,12 +138,11 @@ function analyzedParcelToParcel(ap: AnalyzedParcel, index: number): Parcel {
   const id = `P-${String(index + 1).padStart(5, '0')}`;
   const confidence = ap.confidence;
   const area = ap.area;
-  const existingArea = Math.round(area * (0.88 + Math.random() * 0.2));
+  const existingArea = ap.area;
 
   let status: ParcelStatus = confidence >= 85 ? 'ai_preliminary' : (confidence >= 70 ? 'requires_review' : 'field_verification');
   let priority: Priority = confidence < 60 ? 'CRITICAL' : (confidence < 75 ? 'HIGH' : (confidence < 85 ? 'MEDIUM' : 'LOW'));
   let conflictType: ConflictType | null = null;
-  if (Math.abs(area - existingArea) / existingArea > 0.08) conflictType = 'area_mismatch';
 
   return {
     id,
@@ -150,10 +154,10 @@ function analyzedParcelToParcel(ap: AnalyzedParcel, index: number): Parcel {
     existingArea,
     aiArea: area,
     confidence,
-    boundaryConfidence: Math.max(0, Math.min(100, confidence + Math.floor(-4 + Math.random() * 8))),
-    buildingConfidence: Math.floor(75 + Math.random() * 20),
+    boundaryConfidence: confidence,
+    buildingConfidence: Math.min(95, confidence + 2),
     perimeter: ap.perimeter,
-    boundaryDisplacement: 0.8,
+    boundaryDisplacement: 0.0,
     status,
     conflictType,
     priority,
@@ -161,9 +165,9 @@ function analyzedParcelToParcel(ap: AnalyzedParcel, index: number): Parcel {
     verificationStatus: 'not_reviewed',
     topologyIssues: [],
     notes: '',
-    recommendation: confidence < 70 ? 'Field verification required.' : 'Accept AI boundary.',
-    conflictReasons: conflictType ? ['Area differs by > 8%'] : [],
-    assignedSurveyor: status === 'field_verification' ? 'Ravi Kumar' : null,
+    recommendation: confidence < 70 ? 'Field verification required.' : 'Accept preliminary AI boundary.',
+    conflictReasons: [],
+    assignedSurveyor: status === 'field_verification' ? 'Authorized Surveyor' : null,
     checklist: {
       boundaryVerified: false,
       existingRecordChecked: false,

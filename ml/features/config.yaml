@@ -1,0 +1,19 @@
+model:
+  name: SegFormerFeatures
+  in_channels: 3
+  num_classes: 6
+  target_size: [512, 512]
+
+training:
+  batch_size: 4
+  epochs: 30
+  learning_rate: 0.0005
+  save_path: "backend/weights/segformer_features.pth"
+
+classes:
+  0: "Background"
+  1: "Building Footprint"
+  2: "Residential"
+  3: "Commercial / Institutional"
+  4: "Industrial"
+  5: "Vegetation / Open Land"

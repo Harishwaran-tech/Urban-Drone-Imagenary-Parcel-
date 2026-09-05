@@ -16,7 +16,7 @@ const SECTIONS = [
 ];
 
 export default function Settings() {
-  const { currentUser, settings, updateSettings } = useApp();
+  const { currentUser, settings, updateSettings, appMode, setAppMode } = useApp();
   const [activeSection, setActiveSection] = useState('profile');
   const [saved, setSaved] = useState(false);
 
@@ -29,7 +29,7 @@ export default function Settings() {
     <div className="p-6 max-w-[1000px] mx-auto space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Configure your surveyor profile, AI thresholds, topology rules, and more.</p>
+        <p className="text-sm text-slate-500 mt-1">Configure your surveyor profile, operational mode, AI thresholds, and backend engine.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -64,27 +64,27 @@ export default function Settings() {
                     {currentUser?.avatar || 'U'}
                   </div>
                   <div>
-                    <div className="font-bold text-slate-800">{currentUser?.name}</div>
+                    <div className="font-bold text-slate-800 text-lg">{currentUser?.name}</div>
                     <div className="text-sm text-slate-500">{currentUser?.email}</div>
                     <div className="text-xs text-blue-600 font-semibold mt-0.5">{currentUser?.role}</div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Full Name</label>
-                    <input type="text" defaultValue={currentUser?.name} className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
+                    <input type="text" defaultValue={currentUser?.name} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Email</label>
-                    <input type="email" defaultValue={currentUser?.email} className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Surveyor License #</label>
+                    <input type="text" defaultValue="SURV-2024-TN-0482" className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Role</label>
-                    <input type="text" defaultValue={currentUser?.role} disabled className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500" />
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Assigned Zone</label>
+                    <input type="text" defaultValue="Zone 04 – Jaipur Urban" className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Department</label>
-                    <input type="text" defaultValue="Cadastral Mapping" className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Survey Organization</label>
+                    <input type="text" defaultValue="Cadastral Survey & Land Records Directorate" className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
                 </div>
                 <Button variant="primary" onClick={handleSave}>
@@ -95,51 +95,109 @@ export default function Settings() {
           )}
 
           {activeSection === 'api' && (
-            <Card title="FastAPI & Deep Learning Engine" subtitle="Backend connection and PyTorch runtime configuration">
-              <div className="p-5 space-y-5">
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-sm text-slate-800">FastAPI Backend URL</div>
-                      <div className="text-xs text-slate-500">HTTP REST endpoint for image inference and PostGIS sync</div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                      http://localhost:8000
-                    </span>
-                  </div>
+            <div className="space-y-6">
+              <Card title="System Operational Mode" subtitle="Separate demo visualization from live survey projects">
+                <div className="p-5 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setAppMode('demo')}
+                      className={`p-4 rounded-xl border text-left transition-all ${
+                        appMode === 'demo'
+                          ? 'border-amber-500 bg-amber-50/70 shadow-sm'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-sm text-amber-900 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                          Demo Sandbox Mode
+                        </span>
+                        {appMode === 'demo' && (
+                          <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        Uses pre-calibrated sample parcels, buildings, roads, and GNSS control points for demonstration and offline review.
+                      </p>
+                    </button>
 
-                  <div className="grid grid-cols-2 gap-3 pt-2 text-xs">
-                    <div className="bg-white p-3 border border-slate-200 rounded-lg">
-                      <span className="text-slate-500 block mb-1">Deep Learning Architecture</span>
-                      <strong className="text-slate-800">PyTorch U-Net (Aerial Segmentation)</strong>
-                    </div>
-                    <div className="bg-white p-3 border border-slate-200 rounded-lg">
-                      <span className="text-slate-500 block mb-1">Geospatial Database</span>
-                      <strong className="text-slate-800">PostgreSQL + PostGIS (Dual-Mode)</strong>
-                    </div>
-                    <div className="bg-white p-3 border border-slate-200 rounded-lg">
-                      <span className="text-slate-500 block mb-1">Georeferencing CRS</span>
-                      <strong className="text-slate-800">EPSG:4326 (WGS84) & EPSG:32643</strong>
-                    </div>
-                    <div className="bg-white p-3 border border-slate-200 rounded-lg">
-                      <span className="text-slate-500 block mb-1">Target Drone Imagery</span>
-                      <strong className="text-slate-800">GeoTIFF / JPG / PNG (0.1–0.5m GSD)</strong>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAppMode('real')}
+                      className={`p-4 rounded-xl border text-left transition-all ${
+                        appMode === 'real'
+                          ? 'border-emerald-500 bg-emerald-50/70 shadow-sm'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-sm text-emerald-900 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          Live Survey Project Mode
+                        </span>
+                        {appMode === 'real' && (
+                          <span className="text-[10px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full font-bold">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        Strict production mode: shows only genuine backend inference results from uploaded GeoTIFFs. Never shows invented parcels.
+                      </p>
+                    </button>
                   </div>
                 </div>
+              </Card>
 
-                <div className="space-y-3">
-                  <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">Model Capabilities</div>
-                  <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
-                    <li>Extracts visual and geometric features (rooftops, property boundaries, access ways) from aerial imagery.</li>
-                    <li>Transforms raster predictions into topological polygons with Douglas-Peucker simplification.</li>
-                    <li>Performs Hausdorff distance boundary comparison against registered cadastral deed records.</li>
-                    <li>Generates conflict flags for human surveyor approval/rejection.</li>
-                  </ul>
+              <Card title="FastAPI & Deep Learning Engine" subtitle="Backend connection and PyTorch runtime configuration">
+                <div className="p-5 space-y-5">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-sm text-slate-800">FastAPI Backend URL</div>
+                        <div className="text-xs text-slate-500">HTTP REST endpoint for image inference and PostGIS sync</div>
+                      </div>
+                      <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                        http://localhost:8000
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-2 text-xs">
+                      <div className="bg-white p-3 border border-slate-200 rounded-lg">
+                        <span className="text-slate-500 block mb-1">Deep Learning Architecture</span>
+                        <strong className="text-slate-800">PyTorch Ensemble (U-Net, SegFormer, DeepLabV3+)</strong>
+                      </div>
+                      <div className="bg-white p-3 border border-slate-200 rounded-lg">
+                        <span className="text-slate-500 block mb-1">Geospatial Database</span>
+                        <strong className="text-slate-800">PostgreSQL + PostGIS (Dual-Mode)</strong>
+                      </div>
+                      <div className="bg-white p-3 border border-slate-200 rounded-lg">
+                        <span className="text-slate-500 block mb-1">Georeferencing CRS</span>
+                        <strong className="text-slate-800">EPSG:4326 (WGS84) & UTM Projections</strong>
+                      </div>
+                      <div className="bg-white p-3 border border-slate-200 rounded-lg">
+                        <span className="text-slate-500 block mb-1">Target Drone Imagery</span>
+                        <strong className="text-slate-800">GeoTIFF / JPG / PNG (0.1–0.5m GSD)</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">Model Capabilities</div>
+                    <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
+                      <li>Model 1 (U-Net): Parcel boundary and wall segmentation.</li>
+                      <li>Model 2 (SegFormer): Building footprint and LULC land-use classification.</li>
+                      <li>Model 3 (DeepLabV3+): Road network and pathway centerline extraction.</li>
+                      <li>Douglas-Peucker simplification with topological snapping and geometry repair.</li>
+                    </ul>
+                  </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
+            </div>
           )}
 
           {activeSection === 'map' && (

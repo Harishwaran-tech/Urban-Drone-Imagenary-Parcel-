@@ -1,16 +1,25 @@
 import os
 import glob
+import logging
 import torch
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 import torchvision.transforms.functional as TF
+from typing import List, Tuple, Dict, Optional
+
+logger = logging.getLogger("cadastra.ml.dataset")
+
+VALID_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
+VALID_MASK_EXTENSIONS = [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
+
 
 class AerialCadastralDataset(Dataset):
     """
-    PyTorch Dataset for drone/aerial imagery semantic segmentation.
-    Loads RGB aerial tiles and corresponding integer class masks.
+    Production PyTorch Dataset for aerial/drone cadastral imagery semantic segmentation.
+    Pairs RGB aerial images with ground-truth integer class masks using filename stems.
+    Guarantees strict pairing: no silent blank mask fallbacks and no synthetic dataset inflation.
     """
     def __init__(
         self,
@@ -18,19 +27,50 @@ class AerialCadastralDataset(Dataset):
         mask_dir: str,
         target_size: tuple = (512, 512),
         augment: bool = False,
+        strict_pairing: bool = True,
     ):
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.target_size = target_size
         self.augment = augment
+        self.strict_pairing = strict_pairing
 
-        # Find image files
-        valid_exts = [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
-        self.image_paths = []
+        # 1. Index all available masks by filename stem (e.g., "tile_01" -> path)
+        self.mask_map: Dict[str, str] = {}
+        if os.path.exists(mask_dir):
+            for ext in VALID_MASK_EXTENSIONS:
+                for p in glob.glob(os.path.join(mask_dir, f"*{ext}")):
+                    stem = os.path.splitext(os.path.basename(p))[0]
+                    self.mask_map[stem] = p
+
+        # 2. Match images to masks strictly by stem
+        self.pairs: List[Tuple[str, str]] = []
+        missing_masks: List[str] = []
+
         if os.path.exists(image_dir):
-            for ext in valid_exts:
-                self.image_paths.extend(glob.glob(os.path.join(image_dir, f"*{ext}")))
-        self.image_paths.sort()
+            found_images: List[str] = []
+            for ext in VALID_IMAGE_EXTENSIONS:
+                found_images.extend(glob.glob(os.path.join(image_dir, f"*{ext}")))
+            found_images.sort()
+
+            for img_path in found_images:
+                stem = os.path.splitext(os.path.basename(img_path))[0]
+                if stem in self.mask_map:
+                    self.pairs.append((img_path, self.mask_map[stem]))
+                else:
+                    missing_masks.append(os.path.basename(img_path))
+
+        if missing_masks and self.strict_pairing:
+            raise FileNotFoundError(
+                f"Ground-truth masks missing for {len(missing_masks)} images in '{mask_dir}'. "
+                f"Sample missing: {missing_masks[:5]}. "
+                f"Supported mask extensions: {VALID_MASK_EXTENSIONS}. "
+                "Training aborted to prevent corrupt evaluation on unverified data."
+            )
+        elif missing_masks:
+            logger.warning(
+                f"Skipping {len(missing_masks)} images with no corresponding masks in '{mask_dir}'."
+            )
 
         self.normalize = transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
@@ -38,47 +78,18 @@ class AerialCadastralDataset(Dataset):
         )
 
     def __len__(self) -> int:
-        # If no images present on disk, return 16 synthetic samples so tests run out of the box
-        return max(16, len(self.image_paths))
-
-    def _generate_synthetic_sample(self, idx: int):
-        """Generates realistic synthetic aerial tile and mask for pipeline verification."""
-        np.random.seed(idx)
-        img = np.random.randint(50, 210, (self.target_size[0], self.target_size[1], 3), dtype=np.uint8)
-        mask = np.zeros(self.target_size, dtype=np.int64)
-
-        # Generate building footprints (Class 1)
-        for _ in range(4):
-            bx = np.random.randint(40, self.target_size[1] - 120)
-            by = np.random.randint(40, self.target_size[0] - 120)
-            bw = np.random.randint(60, 110)
-            bh = np.random.randint(60, 110)
-            img[by : by + bh, bx : bx + bw] = [210, 205, 190]
-            mask[by : by + bh, bx : bx + bw] = 1
-
-        # Generate parcel boundaries (Class 2)
-        grid_step = self.target_size[0] // 2
-        for g in range(1, 2):
-            img[g * grid_step - 2 : g * grid_step + 2, :] = [40, 40, 40]
-            mask[g * grid_step - 2 : g * grid_step + 2, :] = 2
-
-        img_pil = Image.fromarray(img)
-        mask_pil = Image.fromarray(mask.astype(np.uint8))
-        return img_pil, mask_pil
+        """Returns the actual number of verified, paired real training samples."""
+        return len(self.pairs)
 
     def __getitem__(self, idx: int):
-        if idx < len(self.image_paths):
-            img_path = self.image_paths[idx]
-            filename = os.path.basename(img_path)
-            mask_path = os.path.join(self.mask_dir, filename)
+        if idx >= len(self.pairs):
+            raise IndexError(f"Index {idx} out of range for dataset of size {len(self.pairs)}")
 
-            img_pil = Image.open(img_path).convert("RGB")
-            if os.path.exists(mask_path):
-                mask_pil = Image.open(mask_path).convert("L")
-            else:
-                mask_pil = Image.new("L", img_pil.size, 0)
-        else:
-            img_pil, mask_pil = self._generate_synthetic_sample(idx)
+        img_path, mask_path = self.pairs[idx]
+
+        # Load RGB image and ground-truth mask
+        img_pil = Image.open(img_path).convert("RGB")
+        mask_pil = Image.open(mask_path).convert("L")
 
         # Resize to target dimension
         img_pil = img_pil.resize(self.target_size, Image.BILINEAR)
@@ -96,7 +107,7 @@ class AerialCadastralDataset(Dataset):
                 img_pil = TF.vflip(img_pil)
                 mask_pil = TF.vflip(mask_pil)
 
-            # Random 90 deg rotation
+            # Random Orthogonal Rotation (0, 90, 180, 270 deg)
             rot_choice = int(torch.randint(0, 4, (1,)).item())
             if rot_choice == 1:
                 img_pil = TF.rotate(img_pil, 90)
@@ -116,3 +127,4 @@ class AerialCadastralDataset(Dataset):
         mask_tensor = torch.from_numpy(mask_np)
 
         return img_tensor, mask_tensor
+

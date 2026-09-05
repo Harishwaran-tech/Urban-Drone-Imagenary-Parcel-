@@ -12,6 +12,7 @@ import TopologyValidation from '@/pages/TopologyValidation';
 import FieldVerification from '@/pages/FieldVerification';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
+import ArchitectureOutputs from '@/pages/ArchitectureOutputs';
 
 function AppContent() {
   const { isAuthenticated, currentPage } = useApp();
@@ -32,6 +33,7 @@ function AppContent() {
       case 'topology': return <TopologyValidation />;
       case 'reports': return <Reports />;
       case 'settings': return <Settings />;
+      case 'outputs': return <ArchitectureOutputs />;
       default: return <Dashboard />;
     }
   };

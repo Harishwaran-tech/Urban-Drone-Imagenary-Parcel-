@@ -45,36 +45,46 @@ def compare_with_cadastral_records(
     existing_records: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Performs spatial comparison between AI extracted parcels and existing cadastral boundaries.
+    Performs spatial comparison between AI extracted parcels and registered cadastral boundaries.
+    Only computes boundary displacement and area discrepancies when genuine existing records exist.
+    Never fabricates synthetic shifted geometries.
     """
     enriched_parcels = []
 
     for i, p in enumerate(ai_parcels):
         ai_geo = p.get("geo_coords", [])
-        ai_area = p.get("aiArea", p.get("area_m2", 200.0))
-        
-        # If existing record is provided, compare directly; otherwise generate reference variance
+        ai_area = p.get("aiArea", p.get("area_m2", 0.0))
+
         if existing_records and i < len(existing_records):
             ex_record = existing_records[i]
-            ex_geo = ex_record.get("geo_coords", ai_geo)
-            ex_area = ex_record.get("area", ai_area)
+            ex_geo = ex_record.get("geo_coords", [])
+            ex_area = ex_record.get("area", 0.0)
+
+            bdisp = compute_boundary_displacement_m(ai_geo, ex_geo)
+            area_diff_pct = (
+                round(abs((ai_area - ex_area) / max(1.0, ex_area)) * 100.0, 1)
+                if ex_area > 0
+                else 0.0
+            )
+
+            enriched = {
+                **p,
+                "existingArea": ex_area,
+                "existingGeometry": ex_geo,
+                "boundaryDisplacement": bdisp,
+                "areaDiffPct": area_diff_pct,
+                "hasExistingCadastre": True,
+            }
         else:
-            # Synthetic reference cadastral boundary with minor offset
-            shift_lng = (0.00003 if i % 3 == 0 else -0.00002)
-            shift_lat = (0.00002 if i % 2 == 0 else -0.00003)
-            ex_geo = [(lng + shift_lng, lat + shift_lat) for lng, lat in ai_geo]
-            ex_area = round(ai_area * (0.94 + (i % 7) * 0.02), 1)
-
-        bdisp = compute_boundary_displacement_m(ai_geo, ex_geo)
-        area_diff_pct = round(abs((ai_area - ex_area) / max(1.0, ex_area)) * 100.0, 1)
-
-        enriched = {
-            **p,
-            "existingArea": ex_area,
-            "existingGeometry": ex_geo,
-            "boundaryDisplacement": bdisp,
-            "areaDiffPct": area_diff_pct,
-        }
+            enriched = {
+                **p,
+                "existingArea": None,
+                "existingGeometry": None,
+                "boundaryDisplacement": 0.0,
+                "areaDiffPct": 0.0,
+                "hasExistingCadastre": False,
+            }
         enriched_parcels.append(enriched)
 
     return enriched_parcels
+

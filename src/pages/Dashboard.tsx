@@ -91,12 +91,43 @@ export default function Dashboard() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <KPICard label="Total Projects" value={12} color="blue" icon={<FolderKanban className="w-4 h-4" />} />
-        <KPICard label="Parcels Processed" value="4,826" color="slate" icon={<Layers className="w-4 h-4" />} />
-        <KPICard label="Verified" value="3,917" color="green" icon={<BadgeCheck className="w-4 h-4" />} trend="81% acceptance rate" />
-        <KPICard label="Requiring Review" value={682} color="amber" icon={<AlertTriangle className="w-4 h-4" />} />
-        <KPICard label="Field Verification" value={227} color="red" icon={<MapPin className="w-4 h-4" />} />
-        <KPICard label="Topology Errors" value={43} color="slate" icon={<GitBranch className="w-4 h-4" />} />
+        <KPICard
+          label="Active Project"
+          value={activeProject?.name?.slice(0, 14) || "Jaipur Survey"}
+          color="blue"
+          icon={<FolderKanban className="w-4 h-4" />}
+        />
+        <KPICard
+          label="Parcels Processed"
+          value={parcels.length}
+          color="slate"
+          icon={<Layers className="w-4 h-4" />}
+        />
+        <KPICard
+          label="Verified"
+          value={verified}
+          color="green"
+          icon={<BadgeCheck className="w-4 h-4" />}
+          trend={parcels.length > 0 ? `${Math.round((verified / parcels.length) * 100)}% verified` : undefined}
+        />
+        <KPICard
+          label="Requiring Review"
+          value={review}
+          color="amber"
+          icon={<AlertTriangle className="w-4 h-4" />}
+        />
+        <KPICard
+          label="Field Verification"
+          value={fieldVerif}
+          color="red"
+          icon={<MapPin className="w-4 h-4" />}
+        />
+        <KPICard
+          label="Topology Errors"
+          value={parcels.filter(p => p.topologyStatus === 'invalid').length}
+          color="slate"
+          icon={<GitBranch className="w-4 h-4" />}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

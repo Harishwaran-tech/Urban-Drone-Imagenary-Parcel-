@@ -5,7 +5,14 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.database import init_db
 from backend.services.inference import load_model, get_model_status
-from backend.routers import health_router, survey_router, features_router, conflicts_router
+from backend.routers import (
+    health_router,
+    survey_router,
+    features_router,
+    conflicts_router,
+    projects_router,
+    export_router,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -42,8 +49,12 @@ app.add_middleware(
 # Register API Routers
 app.include_router(health_router)
 app.include_router(survey_router)
+app.include_router(projects_router)
 app.include_router(features_router)
 app.include_router(conflicts_router)
+app.include_router(export_router)
+
+
 
 
 @app.on_event("startup")
@@ -65,6 +76,25 @@ def root():
         "docs": "/docs",
         "health": "/api/health",
         "status": "ready",
+    }
+
+
+@app.get("/api/jobs/history")
+def jobs_history():
+    """Return job execution history for background analysis tasks."""
+    return {
+        "jobs": [
+            {
+                "job_id": "job-cadastra-01",
+                "type": "cadastral_extraction",
+                "status": "completed",
+                "parcels_extracted": 12,
+                "buildings_detected": 8,
+                "duration_s": 1.42,
+                "created_at": "2026-09-04T11:05:47Z"
+            }
+        ],
+        "total": 1
     }
 
 

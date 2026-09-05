@@ -35,11 +35,47 @@ def get_db():
     finally:
         db.close()
 
+from sqlalchemy import text as sa_text
+
 def init_db():
-    """Initializes database tables on startup."""
+    """Initializes database tables on startup and migrates schema if needed."""
     try:
         from backend.models import db_models
         Base.metadata.create_all(bind=engine)
+
+        # SQLite automatic schema migration for added columns
+        if not IS_POSTGRES:
+            with engine.connect() as conn:
+                # Check parcels columns
+                res = conn.execute(sa_text("PRAGMA table_info(parcels)"))
+                existing_cols = {row[1] for row in res.fetchall()}
+                new_cols = {
+                    "corrected_geometry_json": "TEXT",
+                    "current_geometry_json": "TEXT",
+                    "ground_truth_geometry_json": "TEXT",
+                    "validation_metrics_json": "TEXT DEFAULT '{}'",
+                }
+                for col_name, col_type in new_cols.items():
+                    if col_name not in existing_cols:
+                        conn.execute(sa_text(f"ALTER TABLE parcels ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"Added column {col_name} to parcels table.")
+
+                # Check detected_features columns
+                res_f = conn.execute(sa_text("PRAGMA table_info(detected_features)"))
+                existing_f_cols = {row[1] for row in res_f.fetchall()}
+                new_f_cols = {
+                    "layer_name": "VARCHAR(64) DEFAULT 'features'",
+                    "source_model": "VARCHAR(64)",
+                    "properties_json": "TEXT DEFAULT '{}'",
+                }
+                for col_name, col_type in new_f_cols.items():
+                    if col_name not in existing_f_cols:
+                        conn.execute(sa_text(f"ALTER TABLE detected_features ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"Added column {col_name} to detected_features table.")
+
+                conn.commit()
+
         logger.info("Database tables initialized successfully.")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
+

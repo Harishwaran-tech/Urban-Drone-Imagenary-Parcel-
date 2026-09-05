@@ -9,9 +9,10 @@ import {
   AlertTriangle, Eye, EyeOff, GitCompare, Pencil, Check, X,
   MapPin, Crosshair, Maximize2, Sparkles, Sliders, SplitSquareVertical,
   Maximize, ZoomIn, ZoomOut, RotateCcw, Compass, ArrowRight, Box,
-  ChevronDown, FileText, Download, CheckCircle2, ChevronRight, Globe,
-  ShieldCheck, Cpu,
+  ChevronDown, FileText, Download, CheckCircle2, ChevronRight, ChevronLeft, Globe,
+  ShieldCheck, Cpu, Search,
 } from 'lucide-react';
+import { MAP_PRESETS, type MapPresetKey } from '@/utils/mapStyles';
 
 export default function WebGIS() {
   const {
@@ -21,13 +22,44 @@ export default function WebGIS() {
     acceptAIBoundary, rejectParcel, requestFieldVerification, repairTopology,
     settings, setCurrentPage, uploadedImage, imageBounds, orthoOpacity, setOrthoOpacity,
     activeProject, projects, setActiveProjectId, getProjectCenter, viewMode, setViewMode,
+    addParcel, updateParcel,
+    activePreset, applyPreset, basemapType, setBasemapType,
+    diffMode, setDiffMode, heatmapMode, setHeatmapMode,
+    threeDMode, setThreeDMode, semanticColorMode, setSemanticColorMode,
+    mapCenter, setMapCenter, mapZoom, setMapZoom,
+    rasterAdjustments, setRasterAdjustments,
+    elevationMode, setElevationMode,
   } = useApp();
 
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(true);
+  const [rightDrawerOpen, setRightDrawerOpen] = useState(true);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
+  const [showKpiDetails, setShowKpiDetails] = useState(false);
   const [measureMode, setMeasureMode] = useState<boolean>(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [isEditingBounding, setIsEditingBounding] = useState(false);
   const [aiSuccessMessage, setAiSuccessMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+
+  // Recalculate Leaflet and Three.js viewport size immediately after panel animation (Item 10)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [leftDrawerOpen, rightDrawerOpen]);
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return parcels.filter(
+      p => p.id.toLowerCase().includes(q) ||
+           (p.surveyNumber && p.surveyNumber.toLowerCase().includes(q)) ||
+           (p.ownerName && p.ownerName.toLowerCase().includes(q))
+    ).slice(0, 8);
+  }, [parcels, searchQuery]);
 
   const baseCenter = useMemo(() => getProjectCenter(), [getProjectCenter]);
 
@@ -40,9 +72,10 @@ export default function WebGIS() {
     setAiSuccessMessage(null);
     setTimeout(() => {
       setIsAiProcessing(false);
+      setLayerVisibility('aiParcelBoundaries', true);
       setAiSuccessMessage('AI Extraction Complete: 12,486 boundaries processed with 94.0% confidence.');
       setTimeout(() => setAiSuccessMessage(null), 4000);
-    }, 1800);
+    }, 1200);
   };
 
   const handleToggleAllLayers = () => {
@@ -60,8 +93,8 @@ export default function WebGIS() {
       {/* 3-Column Main Workspace */}
       <div className="flex-1 flex gap-3 min-h-0 overflow-hidden">
         
-        {/* LEFT COLUMN: Project Workspace */}
-        <div className="w-72 bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col overflow-hidden flex-shrink-0">
+        {/* LEFT COLUMN: Project Workspace (Collapsible) */}
+        <div className={`${leftDrawerOpen ? 'w-72' : 'w-0 opacity-0 overflow-hidden p-0 border-0 pointer-events-none'} bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col flex-shrink-0 transition-all duration-300 ease-in-out`}>
           {/* Header */}
           <div className="px-4 py-3.5 border-b border-slate-100 flex items-center justify-between">
             <h2 className="font-bold text-sm text-slate-800 tracking-tight">Project Workspace</h2>
@@ -252,70 +285,168 @@ export default function WebGIS() {
         </div>
 
         {/* CENTER COLUMN: Bounded GIS Map + Bottom Statistics Ribbon */}
-        <div className="flex-1 flex flex-col gap-3 min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col gap-3 min-w-0 overflow-hidden relative">
           
           {/* Main Map Container */}
           <div className="flex-1 bg-white rounded-2xl border border-slate-200/90 shadow-sm relative overflow-hidden flex flex-col">
-            {/* View Mode Bar Overlay (Top Right of Map) */}
-            <div className="absolute top-3.5 right-14 z-[400] bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-md border border-slate-200/80 flex items-center gap-1">
-              <button
-                onClick={() => setViewMode('3d_twin')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                  viewMode === '3d_twin'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="3D Cadastral Digital Twin"
-              >
-                <Box className="w-3 h-3" />
-                <span>3D Digital Twin</span>
-              </button>
+            
+            {/* Left Drawer Persistent Toggle Handle */}
+            <button
+              onClick={() => setLeftDrawerOpen(!leftDrawerOpen)}
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-[420] w-5 h-12 bg-white/95 hover:bg-white text-slate-600 hover:text-blue-600 rounded-r-xl shadow-md border-r border-y border-slate-200/90 flex items-center justify-center transition-all cursor-pointer"
+              title={leftDrawerOpen ? "Collapse Project Workspace" : "Expand Project Workspace"}
+            >
+              {leftDrawerOpen ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5 text-blue-600" />}
+            </button>
 
-              <button
-                onClick={() => setViewMode('webgis')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                  viewMode === 'webgis'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="2D Map Cadastral Vectors"
-              >
-                <MapIcon className="w-3 h-3" />
-                <span>2D Map</span>
-              </button>
+            {/* Right Drawer Persistent Toggle Handle */}
+            <button
+              onClick={() => setRightDrawerOpen(!rightDrawerOpen)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 z-[420] w-5 h-12 bg-white/95 hover:bg-white text-slate-600 hover:text-blue-600 rounded-l-xl shadow-md border-l border-y border-slate-200/90 flex items-center justify-center transition-all cursor-pointer"
+              title={rightDrawerOpen ? "Collapse Layers & Inspector" : "Expand Layers & Inspector"}
+            >
+              {rightDrawerOpen ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5 text-blue-600" />}
+            </button>
 
-              <button
-                onClick={() => setMeasureMode(!measureMode)}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-lg transition-all flex items-center gap-1 ${
-                  measureMode ? 'bg-cyan-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Measure distance and area"
-              >
-                <Ruler className="w-3 h-3" />
-                <span>Measure</span>
-              </button>
+            {/* Unified Top Toolbar: Search + View Presets Bar (Left) + Elevation & 2D/3D Switcher (Right) */}
+            <div className="absolute top-3 left-6 right-6 z-[400] flex items-center justify-between gap-3 pointer-events-none">
+              {/* Left: Search Bar + View Presets Bar */}
+              <div className="flex items-center gap-2 max-w-[calc(100%-360px)] pointer-events-auto">
+                {/* Compact Search Bar */}
+                <div className="relative shrink-0">
+                  <div className="flex items-center bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-xl px-3 py-1.5 shadow-md focus-within:ring-2 focus-within:ring-blue-500 transition-all w-48">
+                    <Search className="w-3.5 h-3.5 text-slate-400 mr-2 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setShowSearchDropdown(true);
+                      }}
+                      onFocus={() => setShowSearchDropdown(true)}
+                      placeholder="Search parcel / lot..."
+                      className="bg-transparent text-xs text-slate-800 placeholder-slate-400 w-full focus:outline-none"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => {
+                          setSearchQuery('');
+                          setShowSearchDropdown(false);
+                        }}
+                        className="text-slate-400 hover:text-slate-600 ml-1 text-xs cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
 
-              <button
-                onClick={() => setViewMode(viewMode === 'cad_inspector' ? 'webgis' : 'cad_inspector')}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-lg transition-all flex items-center gap-1 ${
-                  viewMode === 'cad_inspector' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="CAD Vector Inspector"
-              >
-                <Pencil className="w-3 h-3" />
-                <span>CAD Inspector</span>
-              </button>
+                  {/* Search Dropdown */}
+                  {showSearchDropdown && searchResults.length > 0 && (
+                    <div className="absolute top-full mt-1.5 left-0 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-[500] max-h-64 overflow-y-auto">
+                      <div className="px-3 py-1.5 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-wide border-b border-slate-100 flex items-center justify-between">
+                        <span>Matching Parcels</span>
+                        <span className="font-mono text-blue-600">{searchResults.length}</span>
+                      </div>
+                      {searchResults.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            setSelectedParcelId(p.id);
+                            setSearchQuery('');
+                            setShowSearchDropdown(false);
+                            if (p.geoCoords && p.geoCoords.length > 0) {
+                              const avgLat = p.geoCoords.reduce((s, c) => s + c[1], 0) / p.geoCoords.length;
+                              const avgLng = p.geoCoords.reduce((s, c) => s + c[0], 0) / p.geoCoords.length;
+                              setMapCenter([avgLat, avgLng]);
+                              setMapZoom(18);
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-left hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors cursor-pointer"
+                        >
+                          <div>
+                            <div className="text-xs font-bold text-slate-800">{p.id}</div>
+                            <div className="text-[10px] text-slate-500">Lot #{p.surveyNumber} · {p.aiArea} m²</div>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">
+                            {p.status}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-              <button
-                onClick={() => setViewMode(viewMode === 'split_compare' ? 'webgis' : 'split_compare')}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-lg transition-all flex items-center gap-1 ${
-                  viewMode === 'split_compare' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Curtain Swipe Comparison"
-              >
-                <SplitSquareVertical className="w-3 h-3" />
-                <span>Curtain Swipe</span>
-              </button>
+                {/* View Presets Bar (7 Presets) */}
+                <div className="bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-md border border-slate-200/80 flex items-center gap-1 overflow-x-auto no-scrollbar">
+                  {(Object.keys(MAP_PRESETS) as MapPresetKey[]).map((key) => {
+                    const preset = MAP_PRESETS[key];
+                    const isActive = activePreset === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => applyPreset(key)}
+                        className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                          isActive
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                        title={preset.description}
+                      >
+                        <span>{preset.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right: Elevation Selector + 2D/3D Mode Switcher */}
+              <div className="flex items-center gap-2 pointer-events-auto shrink-0">
+                {/* Elevation Mode Selector (Hillshade, Elevation, Slope, nDSM) */}
+                <div className="hidden xl:flex items-center bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-md border border-slate-200/80 gap-0.5">
+                  <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Elev</span>
+                  {(['off', 'hillshade', 'elevation', 'slope', 'ndsm'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => setElevationMode(mode)}
+                      className={`px-2 py-0.5 text-[10px] font-bold rounded-md uppercase transition-all ${
+                        elevationMode === mode ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                      title={`Elevation visualization: ${mode.toUpperCase()}`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+
+                {/* View Mode Bar Overlay (2D Map vs 3D Twin) */}
+                <div className="bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-md border border-slate-200/80 flex items-center gap-1">
+                  <button
+                    onClick={() => setViewMode('webgis')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === 'webgis'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                    title="2D Cadastral Vectors & Satellite Orthophoto"
+                  >
+                    <MapIcon className="w-3.5 h-3.5" />
+                    <span>2D Map</span>
+                  </button>
+
+                  <button
+                    onClick={() => setViewMode('3d_twin')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === '3d_twin'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                    title="3D Cadastral Digital Twin"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>3D Twin</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* View Switcher Engine */}
@@ -330,8 +461,17 @@ export default function WebGIS() {
                   onSelectParcel={setSelectedParcelId}
                   layers={layers}
                   uploadedImage={uploadedImage}
-                  baseCenter={baseCenter}
+                  baseCenter={mapCenter}
                   height="100%"
+                  threeDMode={threeDMode}
+                  onThreeDModeChange={setThreeDMode}
+                  semanticColorMode={semanticColorMode}
+                  onSemanticColorModeChange={setSemanticColorMode}
+                  elevationMode={elevationMode}
+                  onViewChange={(c, z) => {
+                    setMapCenter(c);
+                    setMapZoom(z);
+                  }}
                 />
               ) : (
                 <MapView
@@ -342,22 +482,48 @@ export default function WebGIS() {
                   layers={layers}
                   selectedParcelId={selectedParcelId}
                   onSelectParcel={setSelectedParcelId}
+                  onAddParcel={addParcel}
+                  onUpdateParcelGeometry={(id, newAiGeom, newExistingGeom) => {
+                    updateParcel(id, {
+                      aiGeometry: newAiGeom,
+                      existingGeometry: newExistingGeom || newAiGeom,
+                    });
+                    setAiSuccessMessage(`Boundary nodes for ${id} calibrated and saved.`);
+                    setTimeout(() => setAiSuccessMessage(null), 3000);
+                  }}
+                  isEditingBounding={isEditingBounding}
+                  onToggleEditBounding={setIsEditingBounding}
                   uploadedImage={uploadedImage}
                   imageBounds={imageBounds}
                   orthoOpacity={orthoOpacity}
-                  baseCenter={baseCenter}
+                  baseCenter={mapCenter}
+                  baseZoom={mapZoom}
                   compareMode={compareMode}
                   compareSlider={compareSlider}
                   basemapMode={basemapMode}
                   highlightConflicts={layers.conflictAreas}
                   showGrid={settings.showGrid}
                   height="100%"
-                  searchParcelId={selectedParcelId}
+                  searchParcelId={null}
                   measureMode={measureMode}
+                  diffMode={diffMode}
+                  heatmapMode={heatmapMode}
+                  basemapType={basemapType}
+                  onBasemapChange={setBasemapType}
+                  rasterAdjustments={rasterAdjustments}
+                  onRasterAdjustmentsChange={setRasterAdjustments}
+                  elevationMode={elevationMode}
+                  onElevationModeChange={setElevationMode}
+                  onViewChange={(c, z) => {
+                    setMapCenter(c);
+                    setMapZoom(z);
+                  }}
                   onAcceptParcel={(id) => {
                     acceptAIBoundary(id);
+                    setAiSuccessMessage(`Parcel ${id} verified and approved into Cadastral Register.`);
+                    setTimeout(() => setAiSuccessMessage(null), 3500);
                     import('@/services/apiService').then(({ apiService }) => {
-                      apiService.verifyFeature(id, 'Drone GIS Cell', 'Approved in LAND-AI interface').catch(() => {});
+                      apiService.verifyFeature(id, 'Drone GIS Cell', 'Approved in CadastraAI interface').catch(() => {});
                     });
                   }}
                   onRejectParcel={(id) => {
@@ -371,97 +537,110 @@ export default function WebGIS() {
             </div>
           </div>
 
-          {/* Bottom Statistics Ribbon (Image 2 style) */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm px-4 py-2.5 flex items-center justify-between gap-4 flex-wrap flex-shrink-0">
-            {/* Metric 1: Total Parcels */}
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                <Globe className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-base font-extrabold text-slate-800 leading-tight">
-                  {activeProject?.totalParcels ? activeProject.totalParcels.toLocaleString() : '12,486'}
+          {/* Item 11: Compact Status Strip with Expandable Details */}
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-sm px-4 py-2 flex items-center justify-between gap-3 text-xs flex-shrink-0">
+            <div className="flex items-center gap-2.5 text-slate-700 font-semibold flex-wrap">
+              <span className="flex items-center gap-1.5 font-bold text-slate-800">
+                <Globe className="w-3.5 h-3.5 text-blue-600" />
+                <span>{activeProject?.totalParcels ? activeProject.totalParcels.toLocaleString() : '12,486'} Parcels</span>
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                <span>8,932 Buildings</span>
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="flex items-center gap-1.5 text-rose-600 font-bold">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>126 Issues</span>
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="flex items-center gap-1.5 text-emerald-700 font-bold">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                <span>AI 94% Accuracy</span>
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="text-indigo-600 font-mono font-bold">
+                IoU 89.6%
+              </span>
+            </div>
+
+            <button
+              onClick={() => setShowKpiDetails(!showKpiDetails)}
+              className="px-2.5 py-1 text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100/80 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+              title="Expand/Collapse detailed KPI metrics cards"
+            >
+              <span>{showKpiDetails ? 'Hide Details' : 'Expand Details'}</span>
+              <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${showKpiDetails ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+
+          {/* Optional Expanded KPI Cards Drawer */}
+          {showKpiDetails && (
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-lg p-3 grid grid-cols-2 md:grid-cols-5 gap-3 flex-shrink-0 animate-in fade-in slide-in-from-bottom-2">
+              {/* Metric 1: Total Parcels */}
+              <div className="flex items-center gap-2.5 bg-slate-50/80 p-2 rounded-xl border border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
+                  <Globe className="w-4 h-4" />
                 </div>
-                <div className="text-[11px] font-semibold text-slate-500 leading-tight">Total Parcels</div>
-                <div className="text-[9px] text-slate-400">Last updated: 18 May 2025</div>
+                <div>
+                  <div className="text-sm font-extrabold text-slate-800 leading-tight">
+                    {activeProject?.totalParcels ? activeProject.totalParcels.toLocaleString() : '12,486'}
+                  </div>
+                  <div className="text-[10px] font-medium text-slate-500">Total Parcels</div>
+                </div>
               </div>
-            </div>
 
-            <div className="h-8 w-px bg-slate-200 hidden md:block" />
-
-            {/* Metric 2: Total Buildings */}
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
-                <Building2 className="w-5 h-5" />
+              {/* Metric 2: Total Buildings */}
+              <div className="flex items-center gap-2.5 bg-slate-50/80 p-2 rounded-xl border border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-sm font-extrabold text-slate-800 leading-tight">8,932</div>
+                  <div className="text-[10px] font-medium text-slate-500">Total Buildings</div>
+                </div>
               </div>
-              <div>
-                <div className="text-base font-extrabold text-slate-800 leading-tight">8,932</div>
-                <div className="text-[11px] font-semibold text-slate-500 leading-tight">Total Buildings</div>
-                <div className="text-[9px] text-slate-400">Last updated: 18 May 2025</div>
-              </div>
-            </div>
 
-            <div className="h-8 w-px bg-slate-200 hidden md:block" />
-
-            {/* Metric 3: Total Issues */}
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5" />
+              {/* Metric 3: Total Issues */}
+              <div className="flex items-center gap-2.5 bg-slate-50/80 p-2 rounded-xl border border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-sm font-extrabold text-slate-800 leading-tight">126</div>
+                  <div className="text-[10px] font-medium text-slate-500">Topology Issues</div>
+                </div>
               </div>
-              <div>
-                <div className="text-base font-extrabold text-slate-800 leading-tight">126</div>
-                <div className="text-[11px] font-semibold text-slate-500 leading-tight">Total Issues</div>
-                <div className="text-[9px] text-slate-400">Last updated: 18 May 2025</div>
-              </div>
-            </div>
 
-            <div className="h-8 w-px bg-slate-200 hidden md:block" />
-
-            {/* Metric 4: Accuracy AI */}
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-5 h-5" />
+              {/* Metric 4: Accuracy AI */}
+              <div className="flex items-center gap-2.5 bg-slate-50/80 p-2 rounded-xl border border-slate-100">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-sm font-extrabold text-emerald-700 leading-tight">94.0%</div>
+                  <div className="text-[10px] font-medium text-slate-500">Model Confidence</div>
+                </div>
               </div>
-              <div>
-                <div className="text-base font-extrabold text-emerald-700 leading-tight">94%</div>
-                <div className="text-[11px] font-semibold text-slate-500 leading-tight">Accuracy (AI)</div>
-                <div className="text-[9px] text-slate-400">Model Confidence</div>
-              </div>
-            </div>
 
-            <div className="h-8 w-px bg-slate-200 hidden lg:block" />
-
-            {/* Metric 5: Model Performance Widget */}
-            <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl px-3 py-1.5 min-w-[170px] space-y-1">
-              <div className="text-[10px] font-bold text-slate-700 flex justify-between">
-                <span>Model Performance</span>
-              </div>
-              {/* Bar 1: Confidence */}
-              <div>
+              {/* Metric 5: Model Performance Widget */}
+              <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl px-2.5 py-1.5 space-y-1">
                 <div className="flex justify-between text-[9px] text-slate-600 font-medium">
-                  <span>Confidence</span>
-                  <span className="font-bold text-cyan-700">92.4%</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full" style={{ width: '92.4%' }} />
-                </div>
-              </div>
-              {/* Bar 2: IoU */}
-              <div>
-                <div className="flex justify-between text-[9px] text-slate-600 font-medium">
-                  <span>IoU (Testing)</span>
+                  <span>IoU Benchmark</span>
                   <span className="font-bold text-amber-700">89.6%</span>
                 </div>
                 <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                   <div className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full" style={{ width: '89.6%' }} />
                 </div>
+                <div className="text-[9px] text-slate-400 text-right">Sub-decimeter precision</div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* RIGHT COLUMN: Layers & Parcel Details (Image 2 style) */}
-        <div className="w-72 bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col overflow-hidden flex-shrink-0">
+        {/* RIGHT COLUMN: Layers & Parcel Details (Collapsible) */}
+        <div className={`${rightDrawerOpen ? 'w-72' : 'w-0 opacity-0 overflow-hidden p-0 border-0 pointer-events-none'} bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col flex-shrink-0 transition-all duration-300 ease-in-out`}>
           {/* Header */}
           <div className="px-4 py-3.5 border-b border-slate-100 flex items-center justify-between">
             <h2 className="font-bold text-sm text-slate-800 tracking-tight">Layers & Parcel Details</h2>
@@ -618,7 +797,7 @@ export default function WebGIS() {
 
                     <div className="flex items-center justify-between text-slate-600">
                       <span className="text-slate-500 text-[11px]">Predicted By</span>
-                      <span className="font-medium text-slate-700">{selectedParcel.predictedBy || 'LAND-AI Model v2.1'}</span>
+                      <span className="font-medium text-slate-700">{selectedParcel.predictedBy || 'CadastraAI Model v2.1'}</span>
                     </div>
 
                     <div className="flex items-center justify-between text-slate-600">
@@ -628,8 +807,16 @@ export default function WebGIS() {
 
                     <div className="flex items-center justify-between pt-1 border-t border-blue-100/60">
                       <span className="text-slate-500 text-[11px]">Status</span>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-bold">
-                        Pending Approval
+                      <span className={`px-2 py-0.5 border rounded-full text-[10px] font-bold ${
+                        selectedParcel.status === 'verified'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                          : selectedParcel.status === 'rejected'
+                          ? 'bg-rose-100 text-rose-800 border-rose-300'
+                          : selectedParcel.isIssue
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}>
+                        {selectedParcel.status === 'verified' ? 'Approved' : selectedParcel.status === 'rejected' ? 'Rejected' : selectedParcel.isIssue ? 'Requires Review' : 'Pending Approval'}
                       </span>
                     </div>
                   </div>
@@ -647,23 +834,28 @@ export default function WebGIS() {
             <button
               onClick={() => {
                 if (selectedParcel) {
-                  alert(`Editing vector bounding polygon for ${selectedParcel.id}`);
+                  setIsEditingBounding(prev => !prev);
                 }
               }}
-              className="flex-1 py-2 px-3 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
+              className={`flex-1 py-2 px-3 border rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer ${
+                isEditingBounding
+                  ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-500/40'
+                  : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+              }`}
             >
-              <Pencil className="w-3.5 h-3.5 text-slate-500" />
-              <span>Edit Bounding</span>
+              <Pencil className="w-3.5 h-3.5" />
+              <span>{isEditingBounding ? 'Editing Nodes' : 'Edit Bounding'}</span>
             </button>
 
             <button
               onClick={() => {
                 if (selectedParcel) {
                   acceptAIBoundary(selectedParcel.id);
-                  alert(`Parcel ${selectedParcel.id} approved successfully.`);
+                  setAiSuccessMessage(`Parcel ${selectedParcel.id} verified and approved into Cadastral Register.`);
+                  setTimeout(() => setAiSuccessMessage(null), 3500);
                 }
               }}
-              className="flex-1 py-2 px-3 bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
+              className="flex-1 py-2 px-3 bg-white border border-emerald-400 hover:bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-[0.98]"
             >
               <Check className="w-3.5 h-3.5 text-emerald-600" />
               <span>Approve</span>

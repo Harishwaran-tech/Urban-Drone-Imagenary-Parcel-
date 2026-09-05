@@ -14,7 +14,11 @@ export type ConflictType =
   | 'gap'
   | 'self_intersection'
   | 'missing_parcel'
-  | 'new_structure';
+  | 'new_structure'
+  | 'building_encroachment'
+  | 'boundary_displacement';
+
+export type ThreeDViewMode = 'survey' | 'analysis' | 'presentation';
 
 export type TopologyStatus = 'valid' | 'invalid';
 
@@ -106,6 +110,11 @@ export interface Parcel {
   predictedBy?: string;
   createdOn?: string;
   isIssue?: boolean;
+  hasExistingBoundary?: boolean;
+  hasAiBoundary?: boolean;
+  overlapArea?: number; // m²
+  encroachmentDistance?: number; // m
+  gapDistance?: number; // m
 }
 
 export interface Building {
@@ -123,6 +132,9 @@ export interface Building {
   levels?: number;
   wallMaterial?: string;
   facadeColor?: string;
+  heightProvenance?: 'measured' | 'estimated' | 'inferred';
+  floorsProvenance?: 'measured' | 'estimated' | 'inferred';
+  roofProvenance?: 'measured' | 'estimated' | 'inferred';
 }
 
 export interface Road {
@@ -141,6 +153,17 @@ export interface GNSSPoint {
   accuracy: number; // cm
   surveyDate: string;
   parcelId: string;
+}
+
+export interface GTPoint {
+  id: string;
+  x: number;
+  y: number;
+  latitude: number;
+  longitude: number;
+  type: 'boundary_corner' | 'monument' | 'control_benchmark';
+  verifiedBy: string;
+  parcelId?: string;
 }
 
 export interface TopologyIssue {
@@ -235,4 +258,5 @@ export type PageId =
   | 'field-verification'
   | 'topology'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'outputs';

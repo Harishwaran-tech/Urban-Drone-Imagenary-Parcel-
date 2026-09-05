@@ -1,0 +1,23 @@
+model:
+  name: ParcelUNet
+  in_channels: 3
+  num_classes: 2
+  target_size: [512, 512]
+
+training:
+  batch_size: 4
+  epochs: 25
+  learning_rate: 0.0008
+  weight_decay: 0.0001
+  loss_ce_weight: 0.4
+  loss_dice_weight: 0.6
+  save_path: "backend/weights/unet_cadastral.pth"
+
+dataset:
+  train_images: "ml/dataset/parcel/train/images"
+  train_masks: "ml/dataset/parcel/train/masks"
+  val_images: "ml/dataset/parcel/val/images"
+  val_masks: "ml/dataset/parcel/val/masks"
+  classes:
+    0: "Interior / Background"
+    1: "Parcel Boundary / Wall"

@@ -81,37 +81,39 @@ def get_model_status() -> Dict[str, Any]:
     }
 
 
-def _run_pytorch_inference(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Runs forward pass through PyTorch U-Net."""
+def _run_pytorch_inference(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Runs forward pass through PyTorch U-Net and extracts probability maps."""
     global _LOADED_MODEL, _MODEL_DEVICE
     h, w = img_rgb.shape[:2]
 
-    # Preprocessing
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    input_tensor = transform(img_rgb).unsqueeze(0).to(_MODEL_DEVICE)
+    # Preprocessing with pure PyTorch/NumPy (independent of torchvision version)
+    tensor = torch.from_numpy(img_rgb.transpose((2, 0, 1))).float() / 255.0
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    input_tensor = ((tensor - mean) / std).unsqueeze(0).to(_MODEL_DEVICE)
 
     with torch.no_grad():
         logits = _LOADED_MODEL(input_tensor)
         probs = F.softmax(logits, dim=1).squeeze(0).cpu().numpy()  # [Classes, H, W]
 
+    prob_building = probs[1]
+    prob_boundary = probs[2]
+
     # Class 1: Building mask, Class 2: Parcel boundaries
-    building_mask = (probs[1] > 0.45).astype(np.uint8) * 255
-    boundary_mask = (probs[2] > 0.35).astype(np.uint8) * 255
+    building_mask = (prob_building > 0.45).astype(np.uint8) * 255
+    boundary_mask = (prob_boundary > 0.35).astype(np.uint8) * 255
 
-    return boundary_mask, building_mask
+    return boundary_mask, building_mask, prob_boundary, prob_building
 
 
-def _run_development_cv_fallback(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _run_development_cv_fallback(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Transparent development CV fallback for semantic segmentation
     when PyTorch weights are not yet provided.
-    Extracts geometric building footprints and parcel boundary candidates.
+    Extracts geometric building footprints and parcel boundary candidates with edge probability.
     """
     gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-    
+
     # 1. Bilateral filter to preserve strong parcel edges while smoothing noise
     filtered = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
 
@@ -120,6 +122,7 @@ def _run_development_cv_fallback(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.nd
     grad_y = cv2.Sobel(filtered, cv2.CV_32F, 0, 1, ksize=3)
     magnitude = cv2.magnitude(grad_x, grad_y)
     norm_mag = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    prob_boundary = norm_mag.astype(np.float32) / 255.0
 
     # Threshold for boundaries
     _, boundary_mask = cv2.threshold(norm_mag, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -133,20 +136,36 @@ def _run_development_cv_fallback(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.nd
     bldg_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     building_mask = cv2.morphologyEx(building_thresh, cv2.MORPH_OPEN, bldg_kernel)
     building_mask = cv2.morphologyEx(building_mask, cv2.MORPH_CLOSE, bldg_kernel)
+    prob_building = (building_mask.astype(np.float32) / 255.0) * 0.85
 
-    return boundary_mask, building_mask
+    return boundary_mask, building_mask, prob_boundary, prob_building
 
 
-def run_inference(img_rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray, str]:
+def run_inference(
+    img_rgb: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, str, Optional[np.ndarray], Optional[np.ndarray], Dict[str, Any]]:
     """
     Main inference interface.
-    Returns: (boundary_mask, building_mask, inference_mode)
+    Returns: (boundary_mask, building_mask, inference_mode, prob_boundary, prob_building, engine_meta)
     """
     if _MODEL_LOADED and _LOADED_MODEL is not None:
-        boundary_mask, building_mask = _run_pytorch_inference(img_rgb)
+        boundary_mask, building_mask, prob_boundary, prob_building = _run_pytorch_inference(img_rgb)
         mode = "pytorch_unet"
+        engine_meta = {
+            "engine": "pytorch_unet",
+            "production_ai": True,
+            "device": _MODEL_DEVICE,
+            "warning": None,
+        }
     else:
-        boundary_mask, building_mask = _run_development_cv_fallback(img_rgb)
-        mode = "development_cv_fallback"
+        boundary_mask, building_mask, prob_boundary, prob_building = _run_development_cv_fallback(img_rgb)
+        mode = "opencv_fallback"
+        engine_meta = {
+            "engine": "opencv_fallback",
+            "production_ai": False,
+            "device": "cpu",
+            "warning": "Running in OpenCV Computer Vision Fallback mode because trained .pth weights were not loaded.",
+        }
 
-    return boundary_mask, building_mask, mode
+    return boundary_mask, building_mask, mode, prob_boundary, prob_building, engine_meta
+

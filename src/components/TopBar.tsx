@@ -17,6 +17,7 @@ const PAGE_TITLES: Record<PageId, string> = {
   topology: 'Topology Validation',
   reports: 'Reports',
   settings: 'Settings',
+  outputs: 'Architecture Outputs',
 };
 
 export default function TopBar() {
@@ -33,6 +34,8 @@ export default function TopBar() {
     markNotificationRead,
     currentPage,
     logout,
+    appMode,
+    setAppMode,
   } = useApp();
 
   const [showNotifs, setShowNotifs] = useState(false);
@@ -85,7 +88,7 @@ export default function TopBar() {
               </svg>
             </div>
             <div className="flex items-baseline gap-1">
-              <span className="font-black text-white text-base tracking-wider font-sans">LAND-AI</span>
+              <span className="font-black text-white text-base tracking-wider font-sans">CadastraAI</span>
             </div>
           </button>
 
@@ -127,16 +130,38 @@ export default function TopBar() {
 
             <button
               onClick={() => setCurrentPage('reports')}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-800/60"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 text-slate-300 hover:text-white hover:bg-slate-800/60 cursor-pointer"
             >
               <FileText className="w-3.5 h-3.5" />
               <span>Reports</span>
             </button>
+
+            <button
+              onClick={() => setCurrentPage('outputs')}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white hover:bg-slate-800/60"
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Architecture Outputs</span>
+            </button>
           </nav>
         </div>
 
-        {/* Right: Notifications & User Profile Pill */}
-        <div className="flex items-center gap-4">
+        {/* Right: Mode Toggle, Notifications & User Profile Pill */}
+        <div className="flex items-center gap-3">
+          {/* Mode Switcher Pill */}
+          <button
+            onClick={() => setAppMode(appMode === 'demo' ? 'real' : 'demo')}
+            title="Click to toggle between Demo Sandbox and Real Project Mode"
+            className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
+              appMode === 'demo'
+                ? 'bg-amber-950/70 border-amber-500/60 text-amber-300 hover:bg-amber-900/80 shadow-sm'
+                : 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 hover:bg-emerald-900/80 shadow-sm'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${appMode === 'demo' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+            <span>{appMode === 'demo' ? 'DEMO SANDBOX' : 'LIVE SURVEY MODE'}</span>
+          </button>
+
           {/* Notifications */}
           <div className="relative" ref={notifRef}>
             <button
@@ -281,6 +306,20 @@ export default function TopBar() {
             </div>
           )}
         </div>
+
+        {/* Mode Switcher Pill */}
+        <button
+          onClick={() => setAppMode(appMode === 'demo' ? 'real' : 'demo')}
+          title="Click to toggle between Demo Sandbox and Real Project Mode"
+          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
+            appMode === 'demo'
+              ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100 shadow-sm'
+              : 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 shadow-sm'
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full ${appMode === 'demo' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+          <span>{appMode === 'demo' ? 'DEMO SANDBOX' : 'LIVE SURVEY MODE'}</span>
+        </button>
 
         {/* Notifications */}
         <div className="relative" ref={notifRef}>
