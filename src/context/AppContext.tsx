@@ -7,6 +7,10 @@ import type {
   TopologyIssue,
   Project,
   Surveyor,
+  User,
+  UserRole,
+  ProjectMember,
+  AuditLogRecord,
   AppNotification,
   LayerState,
   PageId,
@@ -31,10 +35,13 @@ import {
 } from '@/utils/mapStyles';
 
 interface AppContextValue {
-  // Auth
+  // Auth & RBAC
   isAuthenticated: boolean;
-  currentUser: Surveyor | null;
-  login: (email: string, password: string) => boolean;
+  currentUser: (User & { name: string }) | null;
+  userRole: UserRole;
+  switchRole: (role: UserRole) => void;
+  hasPermission: (permission: string) => boolean;
+  login: (email?: string, password?: string) => boolean;
   logout: () => void;
 
   // Navigation
@@ -172,28 +179,79 @@ const defaultSettings: AppSettings = {
   defaultBasemap: 'satellite',
 };
 
+export const DEMO_ACCOUNTS: Record<UserRole, User & { name: string }> = {
+  ADMIN: {
+    id: 'USR-ADMIN-01',
+    fullName: 'A. Sharma',
+    name: 'A. Sharma',
+    email: 'admin@cadastra.ai',
+    role: 'ADMIN',
+    organization: 'Tamil Nadu Land Survey Directorate',
+    isActive: true,
+    avatar: 'AS',
+  },
+  GIS_ANALYST: {
+    id: 'USR-ANALYST-01',
+    fullName: 'A. Kumar',
+    name: 'A. Kumar',
+    email: 'analyst@cadastra.ai',
+    role: 'GIS_ANALYST',
+    organization: 'State Remote Sensing & GIS Cell',
+    isActive: true,
+    avatar: 'AK',
+  },
+  SURVEYOR: {
+    id: 'USR-SURVEYOR-01',
+    fullName: 'R. Senthil',
+    name: 'R. Senthil',
+    email: 'surveyor@cadastra.ai',
+    role: 'SURVEYOR',
+    organization: 'Chennai District Survey Office',
+    isActive: true,
+    avatar: 'RS',
+  },
+};
+
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
-  const [currentUser, setCurrentUser] = useState<Surveyor | null>({
-    id: 'S001',
-    name: 'Drone GIS Cell',
-    email: 'gis.cell@landauthority.tn.gov.in',
-    role: 'Tamil Nadu Land Authority',
-    avatar: 'TN',
-  });
-  const [currentPage, setCurrentPage] = useState<PageId>('cadastral-map');
-
-  const [projects, setProjects] = useState<Project[]>(generateProjects);
-  const [activeProjectId, setActiveProjectIdState] = useState<string>('PRJ-001');
-  const activeProject = projects.find(p => p.id === activeProjectId) ?? (projects[0] || null);
-
   // Operational Mode
   const [appMode, setAppModeState] = useState<'demo' | 'real'>(() => {
     return (localStorage.getItem('cadastra_app_mode') as 'demo' | 'real') || 'demo';
   });
   const isDemoMode = appMode === 'demo';
+
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const mode = (localStorage.getItem('cadastra_app_mode') as 'demo' | 'real') || 'demo';
+    if (mode === 'real') {
+      return !!localStorage.getItem('cadastra_auth_token');
+    }
+    return true;
+  });
+
+  const [currentUser, setCurrentUser] = useState<(User & { name: string }) | null>(() => {
+    const mode = (localStorage.getItem('cadastra_app_mode') as 'demo' | 'real') || 'demo';
+    if (mode === 'real') {
+      const token = localStorage.getItem('cadastra_auth_token');
+      const savedUser = localStorage.getItem('cadastra_user_data');
+      if (token && savedUser) {
+        try {
+          return JSON.parse(savedUser);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+    const savedRole = (localStorage.getItem('cadastra_user_role') as UserRole) || 'ADMIN';
+    return DEMO_ACCOUNTS[savedRole] || DEMO_ACCOUNTS.ADMIN;
+  });
+  const userRole: UserRole = currentUser?.role || 'ADMIN';
+  const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
+
+  const [projects, setProjects] = useState<Project[]>(generateProjects);
+  const [activeProjectId, setActiveProjectIdState] = useState<string>('PRJ-001');
+  const activeProject = projects.find(p => p.id === activeProjectId) ?? (projects[0] || null);
 
   const [parcels, setParcels] = useState<Parcel[]>(() =>
     appMode === 'demo' ? generateParcels('TN-CHN-W42') : []
@@ -301,37 +359,171 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const login = useCallback((email?: string, _password?: string) => {
-    setIsAuthenticated(true);
-    const cleanEmail = email && email.trim() ? email.trim() : 'gis.cell@landauthority.tn.gov.in';
-    const namePart = cleanEmail.includes('@') ? cleanEmail.split('@')[0] : cleanEmail;
-    const formattedName = namePart.replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-
-    setCurrentUser({
-      id: 'S001',
-      name: formattedName || 'Drone GIS Cell',
-      email: cleanEmail,
-      role: 'Tamil Nadu Land Authority',
-      avatar: (formattedName.slice(0, 2) || 'TN').toUpperCase(),
-    });
-    return true;
+  const switchRole = useCallback((role: UserRole) => {
+    const account = DEMO_ACCOUNTS[role];
+    if (account) {
+      setCurrentUser(account);
+      localStorage.setItem('cadastra_user_role', role);
+    }
   }, []);
+
+  const hasPermission = useCallback((permission: string): boolean => {
+    const role = currentUser?.role || 'SURVEYOR';
+    switch (permission) {
+      case 'manage_users':
+      case 'assign_members':
+      case 'edit_validation_settings':
+        return role === 'ADMIN';
+      case 'create_project':
+      case 'upload_inputs':
+      case 'process_ai':
+      case 'edit_geometry':
+      case 'apply_topology_fix':
+      case 'submit_for_review':
+        return role === 'ADMIN' || role === 'GIS_ANALYST';
+      case 'verify_parcel':
+      case 'reject_parcel':
+      case 'request_correction':
+      case 'field_check':
+        return role === 'SURVEYOR'; // Strict human review separation
+      case 'view_all_audit_logs':
+        return role === 'ADMIN';
+      default:
+        return true;
+    }
+  }, [currentUser]);
+
+  const login = useCallback(async (email?: string, password?: string): Promise<boolean> => {
+    if (appMode === 'real') {
+      if (!email || !password) return false;
+      try {
+        const { apiService } = await import('@/services/apiService');
+        const res = await apiService.login(email, password);
+        if (res && res.token && res.user) {
+          setIsAuthenticated(true);
+          const u: User & { name: string } = {
+            id: res.user.id,
+            fullName: res.user.full_name || res.user.fullName || res.user.email,
+            name: res.user.full_name || res.user.fullName || res.user.email,
+            email: res.user.email,
+            role: res.user.role as UserRole,
+            organization: res.user.organization || '',
+            isActive: res.user.is_active ?? true,
+            avatar: (res.user.full_name || res.user.email).slice(0, 2).toUpperCase(),
+          };
+          setCurrentUser(u);
+          localStorage.setItem('cadastra_user_role', u.role);
+          localStorage.setItem('cadastra_user_data', JSON.stringify(u));
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error('Production authentication failed:', err);
+        return false;
+      }
+    }
+
+    // Demo Mode: Allow demo account selection
+    setIsAuthenticated(true);
+    const cleanEmail = email?.trim().toLowerCase() || '';
+    let selectedAccount = DEMO_ACCOUNTS.SURVEYOR;
+
+    if (cleanEmail.includes('admin')) {
+      selectedAccount = DEMO_ACCOUNTS.ADMIN;
+    } else if (cleanEmail.includes('analyst') || cleanEmail.includes('gis')) {
+      selectedAccount = DEMO_ACCOUNTS.GIS_ANALYST;
+    } else {
+      selectedAccount = DEMO_ACCOUNTS.SURVEYOR;
+    }
+
+    setCurrentUser(selectedAccount);
+    localStorage.setItem('cadastra_user_role', selectedAccount.role);
+    localStorage.setItem('cadastra_user_data', JSON.stringify(selectedAccount));
+    return true;
+  }, [appMode]);
 
   const logout = useCallback(() => {
     setIsAuthenticated(false);
     setCurrentUser(null);
     setCurrentPage('dashboard');
+    localStorage.removeItem('cadastra_auth_token');
+    localStorage.removeItem('cadastra_user_data');
+    import('@/services/apiService').then(({ apiService }) => {
+      apiService.logout().catch(() => {});
+    });
   }, []);
 
   const setActiveProjectId = useCallback((id: string) => {
     setActiveProjectIdState(id);
-    const p = projects.find(item => item.id === id);
-    const prefix = id === 'PRJ-001' ? 'TN-CHN-W42' : id === 'PRJ-002' ? 'RJ-JPR-Z04' : 'RJ-AJM-S12';
-    const newParcels = generateParcels(prefix);
-    setParcels(newParcels);
-    setBuildings(generateBuildings(newParcels));
-    setSelectedParcelId(newParcels[0]?.id || null);
-  }, [projects]);
+    if (appMode === 'demo') {
+      const prefix = id === 'PRJ-001' ? 'TN-CHN-W42' : 'TN-SURV-DEMO';
+      const newParcels = generateParcels(prefix);
+      setParcels(newParcels);
+      setBuildings(generateBuildings(newParcels));
+      setSelectedParcelId(newParcels[0]?.id || null);
+    } else {
+      // In real mode, clear mock data and load only from backend API
+      fetch(`/api/projects/${id}/parcels`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.features && data.features.length > 0) {
+            const loaded = data.features.map((f: any) => ({
+              id: f.properties.id || f.id,
+              surveyNumber: f.properties.survey_number || f.properties.surveyNumber || 'S-001',
+              ward: f.properties.ward || 'Ward 01',
+              zone: f.properties.zone || 'Zone 01',
+              area: f.properties.area_m2 || 0,
+              perimeter: f.properties.perimeter_m || 0,
+              confidence: f.properties.confidence ?? null,
+              boundaryConfidence: f.properties.confidence ?? null,
+              buildingConfidence: f.properties.confidence ?? null,
+              status: f.properties.status || 'ai_preliminary',
+              priority: f.properties.priority || 'LOW',
+              topologyStatus: f.properties.topology_status || 'valid',
+              conflictType: f.properties.conflict_type || null,
+              coordinates: f.geometry?.coordinates?.[0]?.map((c: [number, number]) => ({ lat: c[1], lng: c[0] })) || [],
+            }));
+            setParcels(loaded);
+            setSelectedParcelId(loaded[0]?.id || null);
+          } else {
+            setParcels([]);
+            setSelectedParcelId(null);
+          }
+        })
+        .catch(() => {
+          setParcels([]);
+          setSelectedParcelId(null);
+        });
+
+      fetch(`/api/projects/${id}/buildings`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.features && data.features.length > 0) {
+            const loadedBld = data.features.map((f: any) => ({
+              id: f.properties.id || f.id,
+              parcelId: f.properties.parcel_id,
+              type: f.properties.structure_type || 'Unknown',
+              height: f.properties.height_m ?? null,
+              heightProvenance: f.properties.height_provenance || 'unknown',
+              floors: f.properties.floors ?? null,
+              floorsProvenance: f.properties.floors_provenance || 'unknown',
+              roofType: f.properties.roof_style || 'unknown',
+              roofProvenance: f.properties.roof_provenance || 'unknown',
+              area: f.properties.footprint_area_sqm || 0,
+              confidence: f.properties.confidence ?? null,
+              geometry: f.geometry?.coordinates?.[0]?.map((c: [number, number]) => ({ x: c[0], y: c[1] })) || [],
+            }));
+            setBuildings(loadedBld);
+          } else {
+            setBuildings([]);
+          }
+        })
+        .catch(() => {
+          setBuildings([]);
+        });
+    }
+  }, [projects, appMode]);
+
 
   const getProjectCenter = useCallback((): [number, number] => {
     if (activeProject?.center && Array.isArray(activeProject.center) && activeProject.center.length === 2) {
@@ -342,13 +534,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const createProject = useCallback((data: Partial<Project>): Project => {
     const newId = `PRJ-${String(Date.now()).slice(-4)}`;
-    const center: [number, number] = data.center || [26.9124, 75.7873];
+    const center: [number, number] = data.center || [13.0827, 80.2707];
     const newProject: Project = {
       id: newId,
-      name: data.name || 'Urban Cadastral Survey',
+      name: data.name || 'Cadastral Survey Project',
       surveyArea: data.surveyArea || 'Zone 01',
-      district: data.district || 'Jaipur',
-      state: data.state || 'Rajasthan',
+      district: data.district || '',
+      state: data.state || '',
       surveyDate: data.surveyDate || new Date().toISOString().split('T')[0],
       status: 'data_uploaded',
       progress: 25,
@@ -549,6 +741,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value: AppContextValue = {
     isAuthenticated,
     currentUser,
+    userRole,
+    switchRole,
+    hasPermission,
     login,
     logout,
     currentPage,

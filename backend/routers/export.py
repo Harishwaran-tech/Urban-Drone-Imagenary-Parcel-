@@ -16,12 +16,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models.db_models import SurveyProject, Parcel as DBParcel, GNSSControlPoint, Verification
+from backend.models.db_models import SurveyProject, Parcel as DBParcel, GNSSControlPoint, Verification, User
+from backend.services.auth_service import require_role, create_audit_log
 from backend.services.export_service import (
     export_to_geojson,
     export_to_shapefile_zip,
     export_to_kml,
     export_to_dxf,
+    export_to_geopackage,
     generate_cadastral_pdf_report,
 )
 from backend.services.survey_validation_service import (
@@ -145,9 +147,27 @@ def export_dxf(project_id: str, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{project_id}/export/geopackage")
+@router.get("/{project_id}/export/gpkg")
+def export_geopackage_endpoint(project_id: str, db: Session = Depends(get_db)):
+    """Exports cadastral boundaries as standard OGC GeoPackage (.gpkg)."""
+    parcels = get_parcels_for_project(project_id, db)
+    if not parcels:
+        raise HTTPException(status_code=404, detail="No parcel boundaries found to export as GeoPackage.")
+
+    gpkg_bytes = export_to_geopackage(parcels, table_name="cadastral_parcels")
+    filename = f"cadastral_parcels_{project_id}.gpkg"
+
+    return Response(
+        content=gpkg_bytes,
+        media_type="application/geopackage+sqlite3",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{project_id}/export/pdf")
 def export_pdf(project_id: str, db: Session = Depends(get_db)):
-    """Generates official Cadastral AI Survey Preparation & Quality Verification PDF Report."""
+    """Generates official Cadastral Analysis & Survey Preparation PDF Report."""
     parcels = get_parcels_for_project(project_id, db)
     if not parcels:
         raise HTTPException(status_code=404, detail="No parcel boundaries found to generate PDF report.")
@@ -156,7 +176,7 @@ def export_pdf(project_id: str, db: Session = Depends(get_db)):
     project_meta = {
         "id": project_id,
         "name": proj.name if proj else f"Survey Project {project_id}",
-        "survey_area": proj.survey_area if proj else "Zone 04, Jaipur",
+        "survey_area": proj.survey_area if proj else "Unassigned Sector",
         "survey_date": proj.survey_date if proj else None,
     }
 
@@ -188,20 +208,35 @@ def verify_parcel(
     parcel_id: str,
     payload: VerificationPayload,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["SURVEYOR"])),
 ):
     """
     Surveyor verification workflow:
     Accepts 'verify', 'correct', 'reject', or 'mark_review'.
     Preserves raw AI boundary in ai_geometry_json while recording corrected geometry in corrected_geometry_json.
+    Exclusively permitted to licensed SURVEYOR role.
     """
     result = update_parcel_survey_status(
         parcel_id=parcel_id,
         action=payload.action,
-        surveyor_name=payload.surveyor_name,
+        surveyor_name=payload.surveyor_name or current_user.full_name,
         corrected_coords=payload.corrected_coords,
         notes=payload.notes,
         checklist=payload.checklist,
         db=db,
+    )
+
+    # Record persistent audit trail
+    action_type = f"PARCEL_{payload.action.upper()}"
+    create_audit_log(
+        db=db,
+        action=action_type,
+        user=current_user,
+        project_id=project_id,
+        feature_id=parcel_id,
+        previous_state="PRE_REVIEW",
+        new_state=result["new_status"],
+        reason_notes=payload.notes or f"Surveyor {current_user.full_name} executed {payload.action}",
     )
 
     # Update cache if project is in memory

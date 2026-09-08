@@ -22,6 +22,7 @@ export interface AIAnalysisInput {
   imageUrl?: string;
   existingParcels?: Parcel[];
   surveyId?: string;
+  appMode?: 'real' | 'demo';
 }
 
 export interface AIAnalysisOutput {
@@ -242,9 +243,17 @@ export async function analyzeAerialImage(
       },
     };
   } catch (backendError) {
-    console.warn('FastAPI backend unreachable, running local fallback analysis:', backendError);
+    if (input.appMode !== 'demo') {
+      const msg = backendError instanceof Error ? backendError.message : 'Network connection failure';
+      console.error('FastAPI AI backend unreachable or model unconfigured in Real Mode:', backendError);
+      throw new Error(
+        `Backend / AI Model Pipeline Unavailable: ${msg}. In Real Mode, client-side synthetic fallback is strictly disabled.`
+      );
+    }
 
-    // 2. Client-side Fallback
+    console.warn('FastAPI backend unreachable, running Demo Mode local heuristic fallback:', backendError);
+
+    // 2. Client-side Fallback (STRICTLY DEMO / EXPERIMENTAL MODE ONLY)
     let imageElement: HTMLImageElement;
     if (input.imageFile) {
       imageElement = await loadImageFromFile(input.imageFile);
@@ -271,7 +280,7 @@ export async function analyzeAerialImage(
       buildings,
       rawResult: clientRes,
       processingSteps: clientRes.processingSteps,
-      inferenceMode: 'client_cv_fallback',
+      inferenceMode: 'demo_client_heuristic_fallback',
       stats: {
         totalParcels: parcels.length,
         highConfidence,

@@ -238,31 +238,7 @@ export function generateFacadeDetails(params: FacadeGenerationParams, baseY: num
         }
       }
 
-      // Upper Floor Balconies (Residential, on selected front facades)
-      if (lodLevel === 0 && !isCommercial && !isIndustrial && f >= 1 && f % 2 === 1 && seg.length >= 6.0 && rng.chance(0.65)) {
-        const balW = Math.min(5.5, segLen * 0.45);
-        const balD = 1.4;
-        const balFloorGeo = new THREE.BoxGeometry(balW, 0.22, balD);
-        const balFloor = new THREE.Mesh(balFloorGeo, slabMat);
-        balFloor.position.set(
-          seg.midpoint.x + seg.normalX * (balD / 2),
-          floorY,
-          seg.midpoint.y + seg.normalZ * (balD / 2)
-        );
-        balFloor.rotation.y = -seg.angleRad;
-        group.add(balFloor);
-
-        // Glass balustrade railing
-        const railGeo = new THREE.BoxGeometry(balW, 0.95, 0.06);
-        const rail = new THREE.Mesh(railGeo, glassMat);
-        rail.position.set(
-          seg.midpoint.x + seg.normalX * balD,
-          floorY + 0.58,
-          seg.midpoint.y + seg.normalZ * balD
-        );
-        rail.rotation.y = -seg.angleRad;
-        group.add(rail);
-      }
+      // Balconies omitted to maintain strict cadastral boundary footprint integrity
     }
   });
 

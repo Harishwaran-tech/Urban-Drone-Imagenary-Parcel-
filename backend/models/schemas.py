@@ -21,8 +21,8 @@ class GeoJSONFeatureCollection(BaseModel):
 class SurveyCreate(BaseModel):
     name: str
     survey_area: str
-    district: str = "Jaipur"
-    state: str = "Rajasthan"
+    district: str = "Unassigned"
+    state: str = "Unassigned"
     survey_date: Optional[str] = None
 
 class SurveyResponse(BaseModel):

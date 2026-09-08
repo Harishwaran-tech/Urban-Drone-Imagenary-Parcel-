@@ -12,6 +12,9 @@ from backend.routers import (
     conflicts_router,
     projects_router,
     export_router,
+    auth_router,
+    users_router,
+    audit_router,
 )
 
 # Configure logging
@@ -48,6 +51,9 @@ app.add_middleware(
 
 # Register API Routers
 app.include_router(health_router)
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(audit_router)
 app.include_router(survey_router)
 app.include_router(projects_router)
 app.include_router(features_router)

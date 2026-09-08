@@ -22,7 +22,7 @@ const STAGES = [
 ];
 
 export default function AIProcessing() {
-  const { setCurrentPage, uploadedImageFile, uploadedImage, setAnalysisResult, analysisResult } = useApp();
+  const { setCurrentPage, uploadedImageFile, uploadedImage, setAnalysisResult, analysisResult, appMode } = useApp();
   const [currentStage, setCurrentStage] = useState(0);
   const [stageStates, setStageStates] = useState<('pending' | 'processing' | 'completed')[]>(STAGES.map(() => 'pending'));
   const [progress, setProgress] = useState(0);
@@ -42,6 +42,7 @@ export default function AIProcessing() {
           {
             imageFile: uploadedImageFile || undefined,
             imageDataUrl: uploadedImage || undefined,
+            appMode: appMode,
           },
           (stepDesc, stepIdx, totalSteps) => {
             const mappedStage = Math.min(STAGES.length - 1, Math.floor((stepIdx / Math.max(1, totalSteps)) * STAGES.length));
@@ -67,14 +68,12 @@ export default function AIProcessing() {
       } catch (err: any) {
         console.error('Pipeline error:', err);
         setErrorMsg(err.message || 'Error processing imagery through AI pipeline');
-        // Still allow reviewing default map data
-        setComplete(true);
-        setProgress(100);
+        setComplete(false);
       }
     }
 
     runPipeline();
-  }, [uploadedImageFile, uploadedImage, setAnalysisResult]);
+  }, [uploadedImageFile, uploadedImage, setAnalysisResult, appMode]);
 
   const stats = analysisResult?.stats || {
     totalParcels: 24,
@@ -230,16 +229,11 @@ export default function AIProcessing() {
 
             <div className="flex items-center justify-between flex-wrap gap-3 pt-2 border-t border-green-200/60">
               <div className="text-xs text-slate-600">
-                Georeferenced orthomosaic and vector polygons are ready in the WebGIS map viewer and Architecture Outputs dashboard.
+                Georeferenced orthomosaic and vector polygons are ready in the WebGIS cadastral map viewer.
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" size="md" onClick={() => setCurrentPage('outputs')}>
-                  <Layers className="w-4 h-4 text-emerald-600" /> Architecture Outputs View
-                </Button>
-                <Button variant="primary" size="md" onClick={() => setCurrentPage('cadastral-map')}>
-                  Open Real Cadastral Map (WebGIS) <ArrowRight className="w-4 h-4" />
-                </Button>
-              </div>
+              <Button variant="primary" size="md" onClick={() => setCurrentPage('cadastral-map')}>
+                Open Cadastral Map (WebGIS) <ArrowRight className="w-4 h-4" />
+              </Button>
             </div>
           </div>
         </Card>

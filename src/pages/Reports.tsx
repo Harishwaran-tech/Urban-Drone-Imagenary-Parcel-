@@ -163,9 +163,9 @@ export default function Reports() {
   };
 
   const reportRows = [
-    { label: 'Project Name', value: activeProject?.name || 'Jaipur Urban Cadastral Survey – Zone 04', icon: FileText },
-    { label: 'Survey Area', value: activeProject?.surveyArea || 'Zone 04, Jaipur', icon: MapPin },
-    { label: 'Survey Date', value: activeProject?.surveyDate || '28 Aug 2026', icon: FileText },
+    { label: 'Project Name', value: activeProject?.name || 'Active Cadastral Survey Project', icon: FileText },
+    { label: 'Survey Area', value: activeProject?.surveyArea || 'Unassigned Survey Area', icon: MapPin },
+    { label: 'Survey Date', value: activeProject?.surveyDate || new Date().toISOString().split('T')[0], icon: FileText },
     { label: 'Total Parcels', value: stats.total, icon: Layers },
     { label: 'AI-Generated Parcels', value: stats.total, icon: Layers },
     { label: 'Verified Parcels', value: stats.verified, icon: CheckCircle2 },

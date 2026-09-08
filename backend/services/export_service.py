@@ -17,6 +17,11 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import shapefile
 
+import sqlite3
+import struct
+from shapely.geometry import Polygon
+from shapely import wkb
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import (
@@ -33,6 +38,147 @@ WGS84_PRJ = (
     'PRIMEM["Greenwich",0.0],'
     'UNIT["Degree",0.0174532925199433]]'
 )
+
+
+def export_to_geopackage(parcels: List[Dict[str, Any]], table_name: str = "cadastral_parcels") -> bytes:
+    """
+    Builds a valid OGC GeoPackage (.gpkg) file containing survey parcels
+    with EPSG:4326 geometry and cadastral attribute columns.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as tmp:
+        gpkg_path = tmp.name
+
+    try:
+        conn = sqlite3.connect(gpkg_path)
+        cur = conn.cursor()
+
+        # OGC GeoPackage application_id = 0x47504B47 ('GPKG')
+        cur.execute("PRAGMA application_id = 1196444487;")
+        cur.execute("PRAGMA user_version = 10200;")
+
+        # gpkg_spatial_ref_sys
+        cur.execute("""
+            CREATE TABLE gpkg_spatial_ref_sys (
+                srs_name TEXT NOT NULL,
+                srs_id INTEGER NOT NULL PRIMARY KEY,
+                organization TEXT NOT NULL,
+                organization_coordsys_id INTEGER NOT NULL,
+                definition TEXT NOT NULL,
+                description TEXT
+            );
+        """)
+        cur.execute("""
+            INSERT INTO gpkg_spatial_ref_sys VALUES (
+                'WGS 84', 4326, 'EPSG', 4326,
+                'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]',
+                'World Geodetic System 1984'
+            );
+        """)
+
+        # gpkg_contents
+        cur.execute("""
+            CREATE TABLE gpkg_contents (
+                table_name TEXT NOT NULL PRIMARY KEY,
+                data_type TEXT NOT NULL,
+                identifier TEXT UNIQUE,
+                description TEXT DEFAULT '',
+                last_change DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                min_x REAL, min_y REAL, max_x REAL, max_y REAL,
+                srs_id INTEGER,
+                CONSTRAINT fk_gc_r_srs_id FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys(srs_id)
+            );
+        """)
+
+        # gpkg_geometry_columns
+        cur.execute("""
+            CREATE TABLE gpkg_geometry_columns (
+                table_name TEXT NOT NULL,
+                column_name TEXT NOT NULL,
+                geometry_type_name TEXT NOT NULL,
+                srs_id INTEGER NOT NULL,
+                z TINYINT NOT NULL,
+                m TINYINT NOT NULL,
+                CONSTRAINT pk_geom_cols PRIMARY KEY (table_name, column_name),
+                CONSTRAINT fk_gc_tn FOREIGN KEY (table_name) REFERENCES gpkg_contents(table_name),
+                CONSTRAINT fk_gc_srs FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys(srs_id)
+            );
+        """)
+
+        # User parcels table
+        cur.execute(f"""
+            CREATE TABLE {table_name} (
+                fid INTEGER PRIMARY KEY AUTOINCREMENT,
+                geom BLOB,
+                parcel_id TEXT,
+                survey_number TEXT,
+                ward TEXT,
+                zone TEXT,
+                area_m2 REAL,
+                perimeter_m REAL,
+                confidence REAL,
+                status TEXT,
+                topology_status TEXT,
+                conflict_type TEXT
+            );
+        """)
+
+        cur.execute(f"""
+            INSERT INTO gpkg_contents (table_name, data_type, identifier, srs_id)
+            VALUES ('{table_name}', 'features', '{table_name}', 4326);
+        """)
+
+        cur.execute(f"""
+            INSERT INTO gpkg_geometry_columns VALUES (
+                '{table_name}', 'geom', 'POLYGON', 4326, 0, 0
+            );
+        """)
+
+        for p in parcels:
+            coords = p.get("geo_coords", [])
+            if len(coords) < 3:
+                continue
+            if coords[0] != coords[-1]:
+                coords = coords + [coords[0]]
+
+            poly = Polygon(coords)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+
+            # GPB header: magic 0x4750, version 0, flags 1 (little-endian, empty envelope), srs_id 4326
+            header = b"GP\x00\x01" + struct.pack("<i", 4326)
+            geom_blob = header + wkb.dumps(poly, hex=False)
+
+            cur.execute(f"""
+                INSERT INTO {table_name} (
+                    geom, parcel_id, survey_number, ward, zone, area_m2, perimeter_m, confidence, status, topology_status, conflict_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                geom_blob,
+                p.get("id", ""),
+                p.get("surveyNumber", p.get("survey_number", "")),
+                p.get("ward", "Ward 01"),
+                p.get("zone", "Zone 01"),
+                round(float(p.get("aiArea", p.get("area_m2", 0.0))), 2),
+                round(float(p.get("perimeter", 0.0)), 2),
+                round(float(p.get("confidence", 0.0)), 1),
+                p.get("status", "ai_preliminary"),
+                p.get("topologyStatus", "valid"),
+                p.get("conflictType", "none"),
+            ))
+
+        conn.commit()
+        conn.close()
+
+        with open(gpkg_path, "rb") as f:
+            data = f.read()
+
+        return data
+    finally:
+        if os.path.exists(gpkg_path):
+            try:
+                os.remove(gpkg_path)
+            except Exception:
+                pass
 
 
 def export_to_geojson(parcels: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -308,16 +454,16 @@ def generate_cadastral_pdf_report(
     story = []
 
     # 1. Header & Title
-    story.append(Paragraph("CADASTRAL AI SURVEY & BOUNDARY PREPARATION REPORT", title_style))
+    story.append(Paragraph("CADASTRAL ANALYSIS & SURVEY PREPARATION REPORT", title_style))
     story.append(Spacer(1, 4))
-    story.append(Paragraph("Urban Drone Imagery Parcel Extraction & Survey-Grade Verification", subtitle_style))
+    story.append(Paragraph("Pre-Survey / Planning / Re-survey Aid. Not a final legal record without surveyor signoff.", subtitle_style))
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#2563eb"), spaceBefore=2, spaceAfter=10))
 
     # 2. Project Metadata
-    proj_id = project_meta.get("id", "PRJ-DEMO")
-    proj_name = project_meta.get("name", "Urban Parcel Survey")
-    area_name = project_meta.get("survey_area", "Zone 04, Jaipur")
+    proj_id = project_meta.get("id", "PRJ-UNASSIGNED")
+    proj_name = project_meta.get("name", "Cadastral Survey Project")
+    area_name = project_meta.get("survey_area", "Unassigned Sector")
     date_str = project_meta.get("survey_date", datetime.utcnow().strftime("%Y-%m-%d"))
 
     meta_data = [
@@ -351,7 +497,7 @@ def generate_cadastral_pdf_report(
     total_area_m2 = sum(p.get("aiArea", p.get("area_m2", 0.0)) for p in parcels)
     avg_conf = round(sum(p.get("confidence", 0.0) for p in parcels) / max(1, total_parcels), 1)
 
-    rmse_str = f"{gnss_summary.get('rmse_meters', 0.12):.3f} m" if gnss_summary and gnss_summary.get("has_gnss") else "0.082 m (CORS Calibrated)"
+    rmse_str = f"{gnss_summary.get('rmse_meters', 0.0):.3f} m" if gnss_summary and gnss_summary.get("has_gnss") else "N/A (No GNSS Points Uploaded)"
     top_errors = topology_summary.get("total_topology_errors", 0) if topology_summary else 0
     gt_iou_str = f"{gt_summary.get('mean_iou', 0.0):.3f}" if gt_summary and gt_summary.get("has_ground_truth") else "N/A (No GT uploaded)"
 
@@ -415,14 +561,14 @@ def generate_cadastral_pdf_report(
     story.append(reg_table)
     story.append(Spacer(1, 14))
 
-    # 5. Statutory Surveyor Certification & Disclaimer
-    story.append(Paragraph("STATUTORY DISCLAIMER & SURVEYOR CERTIFICATION", h2_style))
+    # 5. Survey-Support Disclaimer & Surveyor Certification
+    story.append(Paragraph("PRELIMINARY SURVEY-SUPPORT DISCLAIMER & VERIFICATION", h2_style))
     disclaimer_text = (
-        "<b>LEGAL NOTICE:</b> This document constitutes an automated AI-assisted cadastral preparation draft "
-        "generated by the CadastraAI processing platform. Deep learning boundary delineations, elevation models, "
-        "and conflict classifications must undergo mandatory ground-truthing, physical ETS/DGPS field verification, "
-        "and statutory approval by a designated Competent Survey Authority under the applicable Land Revenue Act "
-        "prior to mutation, registration, or title deed modification."
+        "<b>LEGAL NOTICE:</b> This document constitutes an AI-assisted preliminary cadastral/survey-support result "
+        "requiring authorized verification. It does NOT constitute a legally admissible or statutory cadastral record on its own. "
+        "All AI-assisted boundary delineations, elevation models, and conflict classifications must undergo mandatory "
+        "authorized ground-truthing, physical ETS/DGPS field verification, and statutory certification by an authorized Competent "
+        "Survey Authority under the applicable Land Revenue Act prior to mutation, registration, or title deed modification."
     )
     story.append(Paragraph(disclaimer_text, legal_style))
     story.append(Spacer(1, 20))

@@ -64,20 +64,33 @@ class CadastraModelManager:
     def load_all_models(self) -> Dict[str, Any]:
         """Attempts to load all specialized model checkpoints."""
         # 1. Parcel U-Net
-        try:
-            self.model_parcel = ParcelUNet(in_channels=3, num_classes=2).to(self.device)
-            ckpt_parcel = os.path.join(WEIGHTS_DIR, "unet_cadastral.pth")
-            if os.path.exists(ckpt_parcel):
-                state = torch.load(ckpt_parcel, map_location=self.device)
+        # Note: unet_cadastral.pth is an uncalibrated early prototype weight file.
+        # It must NOT be presented as a validated production parcel model.
+        # The parcel model remains MODEL_NOT_CONFIGURED until a newly trained calibrated checkpoint is installed.
+        validated_parcel_ckpt = os.getenv("CADASTRA_VALIDATED_PARCEL_MODEL_PATH")
+        if validated_parcel_ckpt and os.path.exists(validated_parcel_ckpt):
+            try:
+                self.model_parcel = ParcelUNet(in_channels=3, num_classes=2).to(self.device)
+                state = torch.load(validated_parcel_ckpt, map_location=self.device)
                 self.model_parcel.load_state_dict(state, strict=False)
                 self.model_parcel.eval()
-                self.statuses["parcel_unet"] = {"loaded": True, "status": "COMPLETE", "checkpoint": ckpt_parcel}
-            else:
-                self.model_parcel.eval()
-                self.statuses["parcel_unet"] = {"loaded": False, "status": "BASELINE_INITIALIZED", "checkpoint": None}
-        except Exception as e:
-            logger.error(f"Failed to load Parcel U-Net: {e}")
-            self.statuses["parcel_unet"] = {"loaded": False, "status": "FAILED", "error": str(e)}
+                self.statuses["parcel_unet"] = {
+                    "loaded": True,
+                    "status": "COMPLETE",
+                    "checkpoint": validated_parcel_ckpt,
+                    "note": "Calibrated production parcel checkpoint active."
+                }
+            except Exception as e:
+                logger.error(f"Failed to load calibrated Parcel U-Net: {e}")
+                self.statuses["parcel_unet"] = {"loaded": False, "status": "FAILED", "error": str(e)}
+        else:
+            self.model_parcel = None
+            self.statuses["parcel_unet"] = {
+                "loaded": False,
+                "status": "MODEL_NOT_CONFIGURED",
+                "checkpoint": None,
+                "note": "Prototype weights unet_cadastral.pth pending newly trained calibrated checkpoint validation."
+            }
 
         # 2. SegFormer Features & LULC
         try:

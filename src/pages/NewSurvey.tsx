@@ -18,11 +18,13 @@ interface UploadSlot {
 }
 
 const UPLOAD_SLOTS: UploadSlot[] = [
-  { id: 'aerial', label: 'Aerial / Drone Imagery', accept: '.tif,.tiff,.jpg,.jpeg,.png', icon: Cloud, description: 'GeoTIFF, JPG, PNG (High-Resolution)', required: true },
-  { id: 'existing', label: 'Existing Cadastral Records (Optional)', accept: '.geojson,.shp,.kml,.json', icon: Map, description: 'GeoJSON, Shapefile, KML (Reference Layer)', required: false },
-  { id: 'dsm', label: 'Digital Surface Model (DSM)', accept: '.tif,.tiff', icon: Mountain, description: 'GeoTIFF Elevation Raster', required: false },
-  { id: 'dtm', label: 'Digital Terrain Model (DTM)', accept: '.tif,.tiff', icon: Layers3, description: 'GeoTIFF Bare-Earth Raster', required: false },
-  { id: 'gnss', label: 'GNSS/CORS Ground Control Data', accept: '.csv,.geojson,.txt', icon: Ruler, description: 'CSV, GeoJSON Survey Points', required: false },
+  { id: 'ori', label: 'Drone Orthomosaic (ORI)', accept: '.tif,.tiff,.jpg,.jpeg,.png', icon: Cloud, description: 'GeoTIFF, High-Resolution Orthomosaic (Primary Survey Raster)', required: true },
+  { id: 'drone', label: 'Raw / Oblique Drone Imagery', accept: '.jpg,.jpeg,.png,.tif', icon: ImageIcon, description: 'High-Resolution Aerial Snapshots for Feature Detail', required: false },
+  { id: 'dsm', label: 'Digital Surface Model (DSM)', accept: '.tif,.tiff', icon: Mountain, description: 'GeoTIFF Surface Elevation Raster (Structure Heights)', required: false },
+  { id: 'dtm', label: 'Digital Terrain Model (DTM)', accept: '.tif,.tiff', icon: Layers3, description: 'GeoTIFF Bare-Earth Elevation Raster (Ground Datum)', required: false },
+  { id: 'existing', label: 'Existing Cadastral Records (Reference)', accept: '.geojson,.shp,.zip,.kml,.json', icon: Map, description: 'GeoJSON, Shapefile ZIP, KML (Historical Boundary Overlay)', required: false },
+  { id: 'gt', label: 'Ground Truth Cadastral Parcels (Validation)', accept: '.geojson,.shp,.zip,.kml,.json', icon: Shield, description: 'Survey-Grade Ground Truth for IoU & Hausdorff Validation', required: false },
+  { id: 'gnss', label: 'GNSS / CORS RTK Control Points', accept: '.csv,.geojson,.txt', icon: Ruler, description: 'CSV (ID, Latitude, Longitude, Elevation) Field Benchmarks', required: false },
 ];
 
 const CITY_PRESETS: { city: string; state: string; lat: number; lng: number }[] = [
@@ -41,7 +43,7 @@ const CITY_PRESETS: { city: string; state: string; lat: number; lng: number }[] 
 const STATES = ['Rajasthan', 'Maharashtra', 'Karnataka', 'Tamil Nadu', 'Gujarat', 'Delhi', 'Telangana', 'West Bengal', 'Uttar Pradesh', 'Madhya Pradesh', 'Punjab'];
 
 export default function NewSurvey() {
-  const { setCurrentPage, setUploadedImage, setIsRealAnalysis, createProject } = useApp();
+  const { setCurrentPage, setUploadedImage, setIsRealAnalysis, createProject, appMode } = useApp();
   const [formData, setFormData] = useState({
     projectName: 'Urban Parcel Cadastral Survey',
     surveyArea: 'Zone 04 Sector 12',
@@ -59,6 +61,7 @@ export default function NewSurvey() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState<string>('residential_colony');
   const [loadingSample, setLoadingSample] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleCitySelect = (cityObj: typeof CITY_PRESETS[0]) => {
     setFormData(prev => ({
@@ -77,8 +80,9 @@ export default function NewSurvey() {
     const fileNames = fileArr.map(f => f.name);
     setUploadedFiles(prev => ({ ...prev, [slotId]: [...(prev[slotId] || []), ...fileNames] }));
     setUploadedFileObjs(prev => ({ ...prev, [slotId]: [...(prev[slotId] || []), ...fileArr] }));
+    setUploadError(null);
 
-    if (slotId === 'aerial' && fileArr.length > 0) {
+    if ((slotId === 'ori' || slotId === 'aerial' || slotId === 'drone') && fileArr.length > 0) {
       const imageFile = fileArr[0];
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -94,7 +98,7 @@ export default function NewSurvey() {
   const removeFile = (slotId: string, fileName: string) => {
     setUploadedFiles(prev => ({ ...prev, [slotId]: (prev[slotId] || []).filter(f => f !== fileName) }));
     setUploadedFileObjs(prev => ({ ...prev, [slotId]: (prev[slotId] || []).filter(f => f.name !== fileName) }));
-    if (slotId === 'aerial') {
+    if (slotId === 'ori' || slotId === 'aerial' || slotId === 'drone') {
       setImagePreview(null);
       setUploadedImage(null, null);
       setIsRealAnalysis(false);
@@ -117,22 +121,27 @@ export default function NewSurvey() {
     try {
       const sample = await generateRealisticDroneSample(preset.id);
       setImagePreview(sample.dataUrl);
-      setUploadedFiles(prev => ({ ...prev, aerial: [sample.name] }));
-      setUploadedFileObjs(prev => ({ ...prev, aerial: [sample.file] }));
+      setUploadedFiles(prev => ({ ...prev, ori: [sample.name] }));
+      setUploadedFileObjs(prev => ({ ...prev, ori: [sample.file] }));
       setUploadedImage(sample.dataUrl, sample.file);
       setIsRealAnalysis(true);
+      setUploadError(null);
     } finally {
       setLoadingSample(false);
     }
   };
 
-  const hasAerialUpload = (uploadedFiles['aerial']?.length ?? 0) > 0 || imagePreview !== null;
+  const hasAerialUpload = (uploadedFiles['ori']?.length ?? 0) > 0 || (uploadedFiles['aerial']?.length ?? 0) > 0 || imagePreview !== null;
 
   const handleStart = async () => {
     let activeDataUrl = imagePreview;
-    let activeFile = uploadedFileObjs['aerial']?.[0] || null;
+    let activeFile = uploadedFileObjs['ori']?.[0] || uploadedFileObjs['aerial']?.[0] || null;
 
     if (!activeDataUrl || !activeFile) {
+      if (appMode === 'real') {
+        setUploadError('Required Drone Orthomosaic (ORI) raster is missing. In Real Project Mode, please upload a genuine GeoTIFF or orthomosaic file to proceed.');
+        return;
+      }
       const sample = await generateRealisticDroneSample(selectedPresetId);
       activeDataUrl = sample.dataUrl;
       activeFile = sample.file;
@@ -402,6 +411,79 @@ export default function NewSurvey() {
               <div className="relative rounded-lg overflow-hidden border border-slate-200 bg-slate-900 flex items-center justify-center min-h-[180px] p-2">
                 <img src={imagePreview} alt="Aerial imagery preview" className="max-h-72 object-contain rounded" />
               </div>
+            </div>
+          )}
+
+          {/* Preflight Compatibility Checklist */}
+          <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-blue-400" /> Preflight Dataset Checklist
+              </span>
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                appMode === 'real' ? 'bg-blue-900/60 text-blue-300 border border-blue-700' : 'bg-emerald-900/60 text-emerald-300 border border-emerald-700'
+              }`}>
+                {appMode === 'real' ? 'REAL_MODE (Strict Ingestion)' : 'DEMO_MODE (Sandbox)'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className={`p-2.5 rounded border ${
+                (uploadedFiles['ori']?.length || uploadedFiles['aerial']?.length || imagePreview) 
+                  ? 'bg-green-950/50 border-green-700 text-green-300' 
+                  : 'bg-red-950/40 border-red-800 text-red-300'
+              }`}>
+                <div className="font-semibold flex items-center gap-1">
+                  {(uploadedFiles['ori']?.length || uploadedFiles['aerial']?.length || imagePreview) ? '✓' : '✗'} ORI Raster
+                </div>
+                <div className="text-[10px] opacity-80">
+                  {(uploadedFiles['ori']?.length || uploadedFiles['aerial']?.length || imagePreview) ? 'Validated (Primary)' : 'Required (Missing)'}
+                </div>
+              </div>
+
+              <div className={`p-2.5 rounded border ${
+                uploadedFiles['dsm']?.length 
+                  ? 'bg-green-950/50 border-green-700 text-green-300' 
+                  : 'bg-slate-800/40 border-slate-700 text-slate-400'
+              }`}>
+                <div className="font-semibold flex items-center gap-1">
+                  {uploadedFiles['dsm']?.length ? '✓' : '○'} DSM Elevation
+                </div>
+                <div className="text-[10px] opacity-80">
+                  {uploadedFiles['dsm']?.length ? 'Aligned (Heights)' : 'Optional (Shadow heuristic)'}
+                </div>
+              </div>
+
+              <div className={`p-2.5 rounded border ${
+                uploadedFiles['existing']?.length 
+                  ? 'bg-green-950/50 border-green-700 text-green-300' 
+                  : 'bg-slate-800/40 border-slate-700 text-slate-400'
+              }`}>
+                <div className="font-semibold flex items-center gap-1">
+                  {uploadedFiles['existing']?.length ? '✓' : '○'} Ref Cadastre
+                </div>
+                <div className="text-[10px] opacity-80">
+                  {uploadedFiles['existing']?.length ? 'Loaded (Displacements)' : 'Optional (No ref)'}
+                </div>
+              </div>
+
+              <div className={`p-2.5 rounded border ${
+                uploadedFiles['gnss']?.length 
+                  ? 'bg-green-950/50 border-green-700 text-green-300' 
+                  : 'bg-slate-800/40 border-slate-700 text-slate-400'
+              }`}>
+                <div className="font-semibold flex items-center gap-1">
+                  {uploadedFiles['gnss']?.length ? '✓' : '○'} GNSS RTK
+                </div>
+                <div className="text-[10px] opacity-80">
+                  {uploadedFiles['gnss']?.length ? 'Calibrated (RMSE)' : 'Relative datum'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {uploadError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2">
+              <span className="font-bold">Error:</span> {uploadError}
             </div>
           )}
 

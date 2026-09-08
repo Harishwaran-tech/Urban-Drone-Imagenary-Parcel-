@@ -192,20 +192,7 @@ export function buildProceduralBuilding(options: ProceduralBuildingOptions): Bui
   });
   bGroup.add(roofGroup);
 
-  // 10. Rooftop Appurtenances (Mumty, Water tanks, Solar, HVAC)
-  if ((roofStyle === 'flat_parapet' || roofStyle === 'flat') && lodLevel <= 1) {
-    const rooftopDetails = generateRooftopDetails({
-      analysis,
-      roofBaseY,
-      mats,
-      isGhosted,
-      wireframe,
-      rng,
-      buildingType: building.type,
-      lodLevel,
-    });
-    bGroup.add(rooftopDetails);
-  }
+  // 10. Rooftop clutter (water tanks, solar panels, HVAC) omitted to maintain survey-grade clean heights
 
   // 11. Silhouette Outline Edges
   const edgeGeo = new THREE.EdgesGeometry(coreGeo, 30);

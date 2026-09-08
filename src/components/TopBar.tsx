@@ -9,7 +9,9 @@ import type { PageId } from '@/types';
 const PAGE_TITLES: Record<PageId, string> = {
   dashboard: 'Dashboard',
   projects: 'Projects',
-  'new-survey': 'New Survey Project',
+  users: 'User Management',
+  'audit-logs': 'Audit Logs',
+  'new-survey': 'New Survey / Datasets',
   'ai-processing': 'AI Processing',
   'cadastral-map': 'Cadastral Map / WebGIS',
   conflicts: 'Conflict Analysis',
@@ -17,12 +19,14 @@ const PAGE_TITLES: Record<PageId, string> = {
   topology: 'Topology Validation',
   reports: 'Reports',
   settings: 'Settings',
-  outputs: 'Architecture Outputs',
+  outputs: 'Outputs',
 };
 
 export default function TopBar() {
   const {
     currentUser,
+    userRole,
+    switchRole,
     activeProject,
     notifications,
     unreadCount,
@@ -135,14 +139,6 @@ export default function TopBar() {
               <FileText className="w-3.5 h-3.5" />
               <span>Reports</span>
             </button>
-
-            <button
-              onClick={() => setCurrentPage('outputs')}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white hover:bg-slate-800/60"
-            >
-              <Layers className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Architecture Outputs</span>
-            </button>
           </nav>
         </div>
 
@@ -226,22 +222,50 @@ export default function TopBar() {
             </button>
 
             {showProfile && (
-              <div className="absolute top-full mt-2 right-0 w-60 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-in fade-in">
+              <div className="absolute top-full mt-2 right-0 w-64 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-in fade-in">
                 <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
-                  <div className="text-xs font-bold text-slate-800">{currentUser?.name || 'Drone GIS Cell'}</div>
-                  <div className="text-[10px] text-slate-500">{currentUser?.email || 'gis.cell@landauthority.tn.gov.in'}</div>
-                  <div className="text-[10px] text-blue-600 font-semibold mt-0.5">{currentUser?.role || 'Tamil Nadu Land Authority'}</div>
+                  <div className="text-xs font-bold text-slate-800">{currentUser?.fullName || currentUser?.name || 'User'}</div>
+                  <div className="text-[10px] text-slate-500">{currentUser?.email}</div>
+                  <div className="text-[10px] font-bold text-blue-600 uppercase mt-0.5">{userRole}</div>
                 </div>
+                
+                {/* Instant Role Switcher */}
+                <div className="p-2 border-b border-slate-100 bg-slate-50/50">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 px-2 mb-1">
+                    Switch Role (Demo)
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-[10px] font-bold">
+                    <button
+                      onClick={() => { switchRole('ADMIN'); setShowProfile(false); }}
+                      className={`py-1.5 px-1 rounded text-center transition-all ${userRole === 'ADMIN' ? 'bg-purple-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
+                    >
+                      Admin
+                    </button>
+                    <button
+                      onClick={() => { switchRole('GIS_ANALYST'); setShowProfile(false); }}
+                      className={`py-1.5 px-1 rounded text-center transition-all ${userRole === 'GIS_ANALYST' ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
+                    >
+                      Analyst
+                    </button>
+                    <button
+                      onClick={() => { switchRole('SURVEYOR'); setShowProfile(false); }}
+                      className={`py-1.5 px-1 rounded text-center transition-all ${userRole === 'SURVEYOR' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
+                    >
+                      Surveyor
+                    </button>
+                  </div>
+                </div>
+
                 <div className="p-1 text-xs">
                   <button
                     onClick={() => { setShowProfile(false); setCurrentPage('settings'); }}
-                    className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-100 rounded-lg font-medium"
+                    className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-100 rounded-lg font-medium cursor-pointer"
                   >
                     Settings & Preferences
                   </button>
                   <button
                     onClick={() => logout()}
-                    className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50 rounded-lg font-medium"
+                    className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50 rounded-lg font-medium cursor-pointer"
                   >
                     Sign Out
                   </button>
@@ -373,14 +397,54 @@ export default function TopBar() {
             <ChevronDown className="w-4 h-4 text-slate-400" />
           </button>
           {showProfile && (
-            <div className="absolute top-full mt-2 right-0 w-56 bg-white rounded-lg shadow-xl border border-slate-200 z-50">
-              <div className="px-4 py-3 border-b border-slate-100">
-                <div className="text-sm font-bold text-slate-800">{currentUser?.name}</div>
-                <div className="text-xs text-slate-500">{currentUser?.email}</div>
-                <div className="text-xs text-blue-600 font-semibold mt-1">{currentUser?.role}</div>
+            <div className="absolute top-full mt-2 right-0 w-64 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-100">
+                <div className="text-xs font-bold text-slate-800">{currentUser?.fullName || currentUser?.name || 'User'}</div>
+                <div className="text-[10px] text-slate-500">{currentUser?.email}</div>
+                <div className="text-[10px] font-bold text-blue-600 uppercase mt-0.5">{userRole}</div>
               </div>
-              <button onClick={() => { setShowProfile(false); setCurrentPage('settings'); }} className="w-full px-4 py-2.5 text-left text-sm text-slate-600 hover:bg-slate-50">Settings</button>
-              <button onClick={() => logout()} className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50">Sign Out</button>
+
+              {/* Instant Role Switcher */}
+              <div className="p-2 border-b border-slate-100 bg-slate-50/50">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 px-2 mb-1">
+                  Switch Role (Demo)
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-[10px] font-bold">
+                  <button
+                    onClick={() => { switchRole('ADMIN'); setShowProfile(false); }}
+                    className={`py-1.5 px-1 rounded text-center transition-all ${userRole === 'ADMIN' ? 'bg-purple-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    Admin
+                  </button>
+                  <button
+                    onClick={() => { switchRole('GIS_ANALYST'); setShowProfile(false); }}
+                    className={`py-1.5 px-1 rounded text-center transition-all ${userRole === 'GIS_ANALYST' ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    Analyst
+                  </button>
+                  <button
+                    onClick={() => { switchRole('SURVEYOR'); setShowProfile(false); }}
+                    className={`py-1.5 px-1 rounded text-center transition-all ${userRole === 'SURVEYOR' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    Surveyor
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-1 text-xs">
+                <button
+                  onClick={() => { setShowProfile(false); setCurrentPage('settings'); }}
+                  className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-100 rounded-lg font-medium cursor-pointer"
+                >
+                  Settings & Preferences
+                </button>
+                <button
+                  onClick={() => logout()}
+                  className="w-full px-3 py-2 text-left text-red-600 hover:bg-red-50 rounded-lg font-medium cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
           )}
         </div>

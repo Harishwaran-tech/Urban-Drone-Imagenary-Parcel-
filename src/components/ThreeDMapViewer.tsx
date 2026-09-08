@@ -22,6 +22,8 @@ interface ThreeDMapViewerProps {
   gnssPoints?: GNSSPoint[];
   selectedParcelId?: string | null;
   onSelectParcel?: (id: string | null) => void;
+  focusParcelId?: string | null;
+  onClearFocusParcel?: () => void;
   layers?: Partial<LayerState>;
   height?: string;
   uploadedImage?: string | null;
@@ -212,6 +214,8 @@ export default function ThreeDMapViewer({
   gnssPoints = [],
   selectedParcelId = null,
   onSelectParcel,
+  focusParcelId = null,
+  onClearFocusParcel,
   layers,
   height = '100%',
   uploadedImage = null,
@@ -428,17 +432,11 @@ export default function ThreeDMapViewer({
     }
   }, [activeLodLevel]);
 
-  // Smooth Zoom on Selected Building Change
+  // Intentional Smooth Zoom on Explicit Focus/Navigation Action
   useEffect(() => {
-    if (!selectedParcelId) {
-      targetOrbit.current.target.set(500, 0, 500);
-      targetOrbit.current.distance = 680;
-      targetOrbit.current.elevation = 0.72;
-      targetOrbit.current.animating = true;
-      return;
-    }
+    if (!focusParcelId) return;
 
-    const parcel = parcels.find((p) => p.id === selectedParcelId);
+    const parcel = parcels.find((p) => p.id === focusParcelId);
     if (!parcel || parcel.aiGeometry.length === 0) return;
 
     const cx = parcel.aiGeometry.reduce((s, pt) => s + pt.x, 0) / parcel.aiGeometry.length;
@@ -450,7 +448,8 @@ export default function ThreeDMapViewer({
     targetOrbit.current.distance = 180;
     targetOrbit.current.elevation = 0.48;
     targetOrbit.current.animating = true;
-  }, [selectedParcelId, parcels, buildingHeightScale, getElevationAt]);
+    onClearFocusParcel?.();
+  }, [focusParcelId, parcels, buildingHeightScale, getElevationAt, onClearFocusParcel]);
 
   // Load uploaded drone orthomosaic image as Three.js texture
   useEffect(() => {
@@ -658,7 +657,14 @@ export default function ThreeDMapViewer({
     const pos = terrainGeo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
 
-    const activeGroundTexture = orthoTextureRef.current || defaultAerialTexRef.current || createDefaultAerialTexture();
+    // P0 Item 7: In Survey Mode, never fabricate a fake aerial map if real ORI is missing.
+    // Keep procedural aerial texture strictly for Presentation / Demo mode.
+    const hasRealOrthomosaic = !!(uploadedImage && orthoTextureRef.current);
+    const activeGroundTexture = hasRealOrthomosaic
+      ? orthoTextureRef.current
+      : (threeDMode === 'presentation'
+          ? (defaultAerialTexRef.current || createDefaultAerialTexture())
+          : null);
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -687,12 +693,22 @@ export default function ThreeDMapViewer({
         const col = new THREE.Color().setHSL(0.55 - normN * 0.42, 0.85, 0.5);
         r = col.r; g = col.g; b = col.b;
       } else {
-        if (z > 580) {
-          r = 0.85; g = 0.95; b = 0.87;
-        } else if (z < 350) {
-          r = 0.75; g = 0.88; b = 0.65;
-        } else if (Math.abs(z - 480) < 32) {
-          r = 0.86; g = 0.90; b = 0.94;
+        if (!activeGroundTexture) {
+          // Neutral surveyed terrain shading
+          const isGridLine = (Math.round(x) % 100 === 0) || (Math.round(z) % 100 === 0);
+          if (isGridLine) {
+            r = 0.22; g = 0.28; b = 0.36;
+          } else {
+            r = 0.12; g = 0.16; b = 0.22;
+          }
+        } else {
+          if (z > 580) {
+            r = 0.85; g = 0.95; b = 0.87;
+          } else if (z < 350) {
+            r = 0.75; g = 0.88; b = 0.65;
+          } else if (Math.abs(z - 480) < 32) {
+            r = 0.86; g = 0.90; b = 0.94;
+          }
         }
       }
 
@@ -705,9 +721,9 @@ export default function ThreeDMapViewer({
 
     const isAnalyticalElevation = elevationMode !== 'off';
     const terrainMat = new THREE.MeshStandardMaterial({
-      vertexColors: isAnalyticalElevation,
-      map: isAnalyticalElevation ? null : activeGroundTexture,
-      roughness: 0.88,
+      vertexColors: isAnalyticalElevation || !activeGroundTexture,
+      map: (isAnalyticalElevation || !activeGroundTexture) ? null : activeGroundTexture,
+      roughness: 0.90,
       metalness: 0.05,
       wireframe: wireframeMode,
       transparent: !!selectedParcelId,
@@ -1683,7 +1699,7 @@ export default function ThreeDMapViewer({
                 )}
               </div>
               <span className="font-mono font-bold text-amber-300 text-sm mt-0.5">
-                {((selectedParcel.buildingHeight || 14) * buildingHeightScale).toFixed(1)} m
+                {selectedParcel.buildingHeight != null ? `${((selectedParcel.buildingHeight) * buildingHeightScale).toFixed(1)} m` : 'Unmeasured'}
               </span>
             </div>
 
@@ -1691,7 +1707,7 @@ export default function ThreeDMapViewer({
             <div className="flex flex-col bg-slate-800/70 p-1.5 rounded-lg border border-slate-700/60">
               <span className="text-[11px] text-slate-400">Footprint</span>
               <span className="font-mono font-bold text-white text-sm mt-0.5">
-                {selectedBuilding?.area || selectedParcel.aiArea} m²
+                {selectedBuilding?.area != null ? `${selectedBuilding.area} m²` : selectedParcel.aiArea != null ? `${selectedParcel.aiArea} m²` : 'Not evaluated'}
               </span>
             </div>
 
@@ -1701,12 +1717,14 @@ export default function ThreeDMapViewer({
                 <span>Floors</span>
                 {selectedBuilding?.floorsProvenance === 'measured' || selectedParcel.floorsProvenance === 'measured' ? (
                   <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" title="Measured">[Measured]</span>
+                ) : selectedBuilding?.floorsProvenance === 'inferred' || selectedParcel.floorsProvenance === 'inferred' ? (
+                  <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40" title="Inferred">[Inferred]</span>
                 ) : (
-                  <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40" title="Estimated">[Estimated]</span>
+                  <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-slate-500/20 text-slate-300 border border-slate-500/40" title="Unknown">[Unknown]</span>
                 )}
               </div>
               <span className="font-mono font-bold text-amber-300 text-sm mt-0.5">
-                {selectedParcel.floors || 3} Floors
+                {selectedParcel.floors != null ? `${selectedParcel.floors} Floors` : 'Unmeasured'}
               </span>
             </div>
 
@@ -1714,7 +1732,7 @@ export default function ThreeDMapViewer({
             <div className="flex flex-col bg-slate-800/70 p-1.5 rounded-lg border border-slate-700/60">
               <span className="text-[11px] text-slate-400">Confidence</span>
               <span className="font-mono font-bold text-emerald-400 text-sm mt-0.5">
-                {selectedParcel.confidence || 94.2}%
+                {selectedParcel.confidence != null ? `${selectedParcel.confidence}%` : 'Not evaluated'}
               </span>
             </div>
           </div>
@@ -1724,13 +1742,13 @@ export default function ThreeDMapViewer({
             <div className="flex items-center justify-between bg-red-950/60 border border-red-500/50 px-2.5 py-1.5 rounded-lg text-xs text-red-200">
               <span className="flex items-center gap-1 font-semibold">
                 <AlertCircle className="w-3.5 h-3.5 text-red-400" />
-                {selectedParcel.conflictType === 'building_encroachment' || selectedParcel.encroachmentDistance
-                  ? `Encroachment: ${selectedParcel.encroachmentDistance || 1.8} m`
-                  : selectedParcel.conflictType === 'overlap' || selectedParcel.overlapArea
-                  ? `Overlap: ${selectedParcel.overlapArea || 14.8} m²`
-                  : selectedParcel.conflictType === 'gap' || selectedParcel.gapDistance
-                  ? `Gap: ${selectedParcel.gapDistance || 0.65} m`
-                  : `Displacement: ${selectedParcel.boundaryDisplacement || 0.38} m`}
+                {selectedParcel.conflictType === 'building_encroachment' || selectedParcel.encroachmentDistance != null
+                  ? `Encroachment: ${selectedParcel.encroachmentDistance != null ? `${selectedParcel.encroachmentDistance} m` : 'Not evaluated'}`
+                  : selectedParcel.conflictType === 'overlap' || selectedParcel.overlapArea != null
+                  ? `Overlap: ${selectedParcel.overlapArea != null ? `${selectedParcel.overlapArea} m²` : 'Not evaluated'}`
+                  : selectedParcel.conflictType === 'gap' || selectedParcel.gapDistance != null
+                  ? `Gap: ${selectedParcel.gapDistance != null ? `${selectedParcel.gapDistance} m` : 'Not evaluated'}`
+                  : `Displacement: ${selectedParcel.boundaryDisplacement != null ? `${selectedParcel.boundaryDisplacement} m` : 'Not evaluated'}`}
               </span>
               <span className="text-[10px] px-1.5 py-0.5 bg-red-500/30 rounded text-red-300 font-mono font-bold">
                 HIGH CONFLICT

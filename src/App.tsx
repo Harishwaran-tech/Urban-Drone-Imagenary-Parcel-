@@ -12,6 +12,8 @@ import TopologyValidation from '@/pages/TopologyValidation';
 import FieldVerification from '@/pages/FieldVerification';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
+import UserManagement from '@/pages/UserManagement';
+import AuditLogs from '@/pages/AuditLogs';
 import ArchitectureOutputs from '@/pages/ArchitectureOutputs';
 
 function AppContent() {
@@ -25,6 +27,8 @@ function AppContent() {
     switch (currentPage) {
       case 'dashboard': return <Dashboard />;
       case 'projects': return <Projects />;
+      case 'users': return <UserManagement />;
+      case 'audit-logs': return <AuditLogs />;
       case 'new-survey': return <NewSurvey />;
       case 'ai-processing': return <AIProcessing />;
       case 'cadastral-map': return <WebGIS />;

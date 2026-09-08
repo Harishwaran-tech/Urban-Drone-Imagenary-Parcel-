@@ -76,13 +76,10 @@ def verify_feature(
         db=db,
     )
     if not result:
-        # If running without pre-populated DB record, return successful mock confirmation
-        return {
-            "id": id,
-            "status": payload.status,
-            "verification_status": "verified",
-            "message": f"Feature {id} verified successfully by {payload.surveyor_name}.",
-        }
+        raise HTTPException(
+            status_code=404,
+            detail=f"Feature with ID '{id}' was not found in the project database.",
+        )
     return result
 
 
@@ -104,11 +101,10 @@ def reject_feature(
         db=db,
     )
     if not result:
-        return {
-            "id": id,
-            "status": "rejected",
-            "message": f"Feature {id} rejected.",
-        }
+        raise HTTPException(
+            status_code=404,
+            detail=f"Feature with ID '{id}' was not found in the project database.",
+        )
     return result
 
 
@@ -125,5 +121,8 @@ def update_feature(
         db=db,
     )
     if not result:
-        return {"id": id, "updated": True}
+        raise HTTPException(
+            status_code=404,
+            detail=f"Feature with ID '{id}' was not found in the project database.",
+        )
     return result

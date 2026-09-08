@@ -24,14 +24,16 @@ def create_survey(data: Dict[str, Any], db: Session) -> Dict[str, Any]:
     survey_id = f"PRJ-{str(uuid.uuid4())[:8].upper()}"
     project = SurveyProject(
         id=survey_id,
-        name=data.get("name", "Urban Parcel Survey"),
-        survey_area=data.get("survey_area", "Zone 04"),
-        district=data.get("district", "Jaipur"),
-        state=data.get("state", "Rajasthan"),
+        name=data.get("name", "Cadastral Survey Project"),
+        survey_area=data.get("survey_area", "Unassigned Sector"),
+        district=data.get("district", ""),
+        state=data.get("state", ""),
         survey_date=data.get("survey_date", datetime.date.today().isoformat()),
         status="created",
         progress=10,
-        area_km2=float(data.get("area_km2", 1.85)),
+        area_km2=float(data.get("area_km2", 0.0)),
+        source_crs=data.get("source_crs", "EPSG:4326"),
+        working_crs=data.get("working_crs", "EPSG:32643"),
     )
     db.add(project)
     db.commit()
@@ -229,7 +231,7 @@ def process_survey_pipeline(
                 proj = SurveyProject(
                     id=proj_id,
                     name=f"Survey {filename}",
-                    survey_area="Zone 04, Jaipur",
+                    survey_area="Unassigned Survey Area",
                     status="analysis_complete",
                     progress=100,
                 )

@@ -18,8 +18,7 @@ def health_check():
         },
         "deep_learning": model_status,
         "georeferencing": {
-            "default_crs": "EPSG:4326 (WGS84)",
-            "anchor_city": "Jaipur, Rajasthan",
-            "anchor_coordinates": [26.9124, 75.7873],
+            "storage_crs": "EPSG:4326 (WGS84)",
+            "project_location": "Configured per Project / GeoTIFF Metadata",
         }
     }

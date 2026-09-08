@@ -60,20 +60,28 @@ def init_db():
                         conn.execute(sa_text(f"ALTER TABLE parcels ADD COLUMN {col_name} {col_type}"))
                         logger.info(f"Added column {col_name} to parcels table.")
 
-                # Check detected_features columns
-                res_f = conn.execute(sa_text("PRAGMA table_info(detected_features)"))
-                existing_f_cols = {row[1] for row in res_f.fetchall()}
-                new_f_cols = {
-                    "layer_name": "VARCHAR(64) DEFAULT 'features'",
-                    "source_model": "VARCHAR(64)",
-                    "properties_json": "TEXT DEFAULT '{}'",
+                # Check survey_projects columns
+                res_p = conn.execute(sa_text("PRAGMA table_info(survey_projects)"))
+                existing_p_cols = {row[1] for row in res_p.fetchall()}
+                new_p_cols = {
+                    "working_crs": "VARCHAR(64)",
+                    "source_crs": "VARCHAR(64)",
                 }
-                for col_name, col_type in new_f_cols.items():
-                    if col_name not in existing_f_cols:
-                        conn.execute(sa_text(f"ALTER TABLE detected_features ADD COLUMN {col_name} {col_type}"))
-                        logger.info(f"Added column {col_name} to detected_features table.")
+                for col_name, col_type in new_p_cols.items():
+                    if col_name not in existing_p_cols:
+                        conn.execute(sa_text(f"ALTER TABLE survey_projects ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"Added column {col_name} to survey_projects table.")
 
                 conn.commit()
+
+        # Seed default users
+        try:
+            from backend.services.auth_service import seed_default_users
+            db_session = SessionLocal()
+            seed_default_users(db_session)
+            db_session.close()
+        except Exception as seed_err:
+            logger.warning(f"Could not seed default users: {seed_err}")
 
         logger.info("Database tables initialized successfully.")
     except Exception as e:

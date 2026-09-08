@@ -215,9 +215,15 @@ export const apiService = {
     checklist?: Record<string, boolean>,
     correctedCoords?: [number, number][]
   ) {
+    const token = localStorage.getItem('cadastra_token');
+    const role = localStorage.getItem('cadastra_user_role') || 'SURVEYOR';
     const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/parcels/${parcelId}/verify`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': role,
+      },
       body: JSON.stringify({
         action,
         surveyor_name: surveyorName,
@@ -226,7 +232,228 @@ export const apiService = {
         corrected_coords: correctedCoords,
       }),
     });
-    if (!res.ok) throw new Error(`Failed to update parcel ${parcelId}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Verification action failed' }));
+      throw new Error(err.detail || `Failed to update parcel ${parcelId}`);
+    }
+    return res.json();
+  },
+
+  /**
+   * GIS Analyst boundary geometry correction.
+   */
+  async correctParcelBoundary(
+    projectId: string,
+    parcelId: string,
+    coordinates: [number, number][],
+    reason: string
+  ) {
+    const token = localStorage.getItem('cadastra_token');
+    const role = localStorage.getItem('cadastra_user_role') || 'GIS_ANALYST';
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/parcels/${parcelId}/correct`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': role,
+      },
+      body: JSON.stringify({ coordinates, reason }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to save correction' }));
+      throw new Error(err.detail || 'Correction failed');
+    }
+    return res.json();
+  },
+
+  /**
+   * GIS Analyst submits parcel to Surveyor review queue.
+   */
+  async submitParcelForReview(projectId: string, parcelId: string, notes: string) {
+    const token = localStorage.getItem('cadastra_token');
+    const role = localStorage.getItem('cadastra_user_role') || 'GIS_ANALYST';
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/parcels/${parcelId}/submit-review`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': role,
+      },
+      body: JSON.stringify({ notes }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to submit parcel' }));
+      throw new Error(err.detail || 'Submission failed');
+    }
+    return res.json();
+  },
+
+  /**
+   * Authentication APIs
+   */
+  async login(email: string, password: string) {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Invalid credentials' }));
+      throw new Error(err.detail || 'Authentication failed');
+    }
+    const data = await res.json();
+    if (data.token) {
+      localStorage.setItem('cadastra_token', data.token);
+      localStorage.setItem('cadastra_user_role', data.user.role);
+    }
+    return data;
+  },
+
+  async logout() {
+    const token = localStorage.getItem('cadastra_token');
+    localStorage.removeItem('cadastra_token');
+    localStorage.removeItem('cadastra_user_role');
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch {}
+  },
+
+  async getMe() {
+    const token = localStorage.getItem('cadastra_token');
+    const role = localStorage.getItem('cadastra_user_role');
+    const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(role ? { 'X-User-Role': role } : {}),
+      },
+    });
+    if (!res.ok) throw new Error('Failed to fetch profile');
+    return res.json();
+  },
+
+  /**
+   * User Management APIs (Admin only)
+   */
+  async getUsers() {
+    const token = localStorage.getItem('cadastra_token');
+    const res = await fetch(`${API_BASE_URL}/api/users`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': 'ADMIN',
+      },
+    });
+    if (!res.ok) throw new Error('Failed to fetch users');
+    return res.json();
+  },
+
+  async createUser(data: { fullName: string; email: string; password: string; role: string; organization?: string }) {
+    const token = localStorage.getItem('cadastra_token');
+    const res = await fetch(`${API_BASE_URL}/api/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': 'ADMIN',
+      },
+      body: JSON.stringify({
+        full_name: data.fullName,
+        email: data.email,
+        password: data.password,
+        role: data.role,
+        organization: data.organization,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to create user' }));
+      throw new Error(err.detail || 'User creation failed');
+    }
+    return res.json();
+  },
+
+  async updateUser(userId: string, data: { fullName?: string; role?: string; organization?: string; isActive?: boolean }) {
+    const token = localStorage.getItem('cadastra_token');
+    const res = await fetch(`${API_BASE_URL}/api/users/${userId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': 'ADMIN',
+      },
+      body: JSON.stringify({
+        full_name: data.fullName,
+        role: data.role,
+        organization: data.organization,
+        is_active: data.isActive,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to update user' }));
+      throw new Error(err.detail || 'User update failed');
+    }
+    return res.json();
+  },
+
+  /**
+   * Project Membership & Assignments
+   */
+  async getProjectMembers(projectId: string) {
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/members`);
+    if (!res.ok) return [];
+    return res.json();
+  },
+
+  async assignProjectMember(projectId: string, userId: string, role: string) {
+    const token = localStorage.getItem('cadastra_token');
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/assign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': 'ADMIN',
+      },
+      body: JSON.stringify({ user_id: userId, role }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to assign member' }));
+      throw new Error(err.detail || 'Assignment failed');
+    }
+    return res.json();
+  },
+
+  async removeProjectMember(projectId: string, userId: string) {
+    const token = localStorage.getItem('cadastra_token');
+    const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/members/${userId}`, {
+      method: 'DELETE',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': 'ADMIN',
+      },
+    });
+    if (!res.ok) throw new Error('Failed to remove assignment');
+    return res.json();
+  },
+
+  /**
+   * Audit Logs API
+   */
+  async getAuditLogs(params?: { projectId?: string; action?: string; userId?: string }) {
+    const token = localStorage.getItem('cadastra_token');
+    const role = localStorage.getItem('cadastra_user_role') || 'ADMIN';
+    const query = new URLSearchParams();
+    if (params?.projectId) query.append('project_id', params.projectId);
+    if (params?.action) query.append('action', params.action);
+    if (params?.userId) query.append('user_id', params.userId);
+
+    const res = await fetch(`${API_BASE_URL}/api/audit-logs?${query.toString()}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-User-Role': role,
+      },
+    });
+    if (!res.ok) throw new Error('Failed to fetch audit logs');
     return res.json();
   },
 

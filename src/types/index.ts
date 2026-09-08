@@ -1,9 +1,28 @@
 export type ParcelStatus =
+  | 'AI_GENERATED'
+  | 'NEEDS_ANALYST_REVIEW'
+  | 'ANALYST_CORRECTED'
+  | 'READY_FOR_SURVEY_REVIEW'
+  | 'FIELD_CHECK_REQUIRED'
+  | 'CORRECTION_REQUESTED'
+  | 'REJECTED'
+  | 'VERIFIED'
   | 'verified'
   | 'ai_preliminary'
   | 'requires_review'
   | 'field_verification'
-  | 'rejected';
+  | 'rejected'
+  | 'corrected';
+
+export type FeatureStatus =
+  | 'AI_GENERATED'
+  | 'NEEDS_ANALYST_REVIEW'
+  | 'ANALYST_CORRECTED'
+  | 'READY_FOR_SURVEY_REVIEW'
+  | 'FIELD_CHECK_REQUIRED'
+  | 'CORRECTION_REQUESTED'
+  | 'REJECTED'
+  | 'VERIFIED';
 
 export type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -199,6 +218,45 @@ export interface Project {
   droneImage?: string | null;
 }
 
+export type UserRole = 'ADMIN' | 'GIS_ANALYST' | 'SURVEYOR';
+
+export interface User {
+  id: string;
+  fullName: string;
+  email: string;
+  role: UserRole;
+  organization: string;
+  isActive: boolean;
+  lastLogin?: string | null;
+  createdAt?: string;
+  avatar?: string;
+}
+
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: 'GIS_ANALYST' | 'SURVEYOR';
+  assignedAt?: string;
+  assignedBy?: string;
+}
+
+export interface AuditLogRecord {
+  id: string;
+  timestamp: string;
+  userId?: string | null;
+  userName: string;
+  role: string;
+  projectId?: string | null;
+  featureId?: string | null;
+  action: string;
+  previousState?: string | null;
+  newState?: string | null;
+  reasonNotes?: string | null;
+}
+
 export interface Surveyor {
   id: string;
   name: string;
@@ -251,6 +309,8 @@ export type WebGISViewMode = 'webgis' | 'cad_inspector' | 'split_compare' | '3d_
 export type PageId =
   | 'dashboard'
   | 'projects'
+  | 'users'
+  | 'audit-logs'
   | 'new-survey'
   | 'ai-processing'
   | 'cadastral-map'

@@ -158,6 +158,10 @@ interface MapViewProps {
   orthoOpacity?: number;
   baseCenter?: [number, number];
   baseZoom?: number;
+  initialCenter?: [number, number];
+  initialZoom?: number;
+  focusParcelId?: string | null;
+  onClearFocusParcel?: () => void;
   compareMode?: boolean;
   compareSlider?: number;
   basemapMode?: 'satellite' | 'street';
@@ -179,6 +183,8 @@ interface MapViewProps {
   elevationMode?: 'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm';
   onElevationModeChange?: (m: 'off' | 'hillshade' | 'elevation' | 'slope' | 'ndsm') => void;
   onViewChange?: (center: [number, number], zoom: number) => void;
+  basemapOpacity?: number;
+  onBasemapOpacityChange?: (opacity: number) => void;
 }
 
 const LULC_COLORS: Record<string, string> = {
@@ -191,25 +197,45 @@ const LULC_COLORS: Record<string, string> = {
 // Component to handle bounds, center, and search zoom
 function MapController({
   searchParcelId,
+  focusParcelId,
+  onClearFocusParcel,
   parcels,
   baseCenter,
+  initialCenter,
+  initialZoom,
   onCursorMove,
   fitTrigger,
   onZoomChange,
   onViewChange,
+  isDraggingRef,
+  lastDragEndRef,
 }: {
   searchParcelId?: string | null;
+  focusParcelId?: string | null;
+  onClearFocusParcel?: () => void;
   parcels: Parcel[];
   baseCenter: [number, number];
+  initialCenter?: [number, number];
+  initialZoom?: number;
   onCursorMove: (coords: { lat: number; lng: number; zoom: number }) => void;
   fitTrigger: number;
   onZoomChange?: (z: number) => void;
   onViewChange?: (center: [number, number], zoom: number) => void;
+  isDraggingRef: React.MutableRefObject<boolean>;
+  lastDragEndRef: React.MutableRefObject<number>;
 }) {
   const map = useMap();
   const initialFitDone = useRef(false);
 
+  // Separate map drag gestures from clicks
   useMapEvents({
+    dragstart() {
+      isDraggingRef.current = true;
+    },
+    dragend() {
+      isDraggingRef.current = false;
+      lastDragEndRef.current = Date.now();
+    },
     mousemove(e) {
       onCursorMove({
         lat: Number(e.latlng.lat.toFixed(5)),
@@ -240,34 +266,52 @@ function MapController({
     },
   });
 
-  // Set initial view once to baseCenter at zoom 17 (Scale 1:2,500)
+  // Handle container resizing without moving/panning camera
+  useEffect(() => {
+    const handleResize = () => {
+      map.invalidateSize({ pan: false });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [map]);
+
+  // Set initial view once to initialCenter or baseCenter
   useEffect(() => {
     if (!initialFitDone.current) {
-      map.setView(baseCenter, DEFAULT_ZOOM, { animate: false });
+      const startCenter = initialCenter || baseCenter;
+      const startZoom = initialZoom || DEFAULT_ZOOM;
+      map.setView(startCenter, startZoom, { animate: false });
       initialFitDone.current = true;
     }
-  }, [baseCenter, map]);
+  }, [baseCenter, initialCenter, initialZoom, map]);
 
-  // Recenter when fitTrigger increases
+  // Recenter when fitTrigger increases (Explicit user button click)
   useEffect(() => {
     if (fitTrigger > 0) {
       map.setView(baseCenter, DEFAULT_ZOOM, { animate: true });
     }
   }, [fitTrigger, baseCenter, map]);
 
-  // Zoom to parcel ONLY when user explicitly searches via search bar
+  // Intentional camera navigation (Search or explicit "Zoom to Parcel")
   useEffect(() => {
-    if (searchParcelId) {
-      const p = parcels.find(item => item.id === searchParcelId);
-      if (p && p.aiGeometry && p.aiGeometry.length > 0) {
-        const latLngs = pointsToLatLngs(p.aiGeometry, baseCenter[0], baseCenter[1]);
-        if (latLngs.length > 0) {
-          const bounds = L.latLngBounds(latLngs);
-          map.flyToBounds(bounds, { maxZoom: 19, padding: [80, 80], duration: 0.6 });
+    const targetId = focusParcelId || searchParcelId;
+    if (targetId) {
+      const p = parcels.find(item => item.id === targetId);
+      if (p) {
+        const geom = (p.aiGeometry && p.aiGeometry.length > 0) ? p.aiGeometry : p.existingGeometry;
+        if (geom && geom.length > 0) {
+          const latLngs = pointsToLatLngs(geom, baseCenter[0], baseCenter[1]);
+          if (latLngs.length > 0) {
+            const bounds = L.latLngBounds(latLngs);
+            map.flyToBounds(bounds, { maxZoom: 19, padding: [80, 80], duration: 0.6 });
+          }
         }
       }
+      if (focusParcelId && onClearFocusParcel) {
+        onClearFocusParcel();
+      }
     }
-  }, [searchParcelId, parcels, baseCenter, map]);
+  }, [focusParcelId, searchParcelId, parcels, baseCenter, map, onClearFocusParcel]);
 
   return null;
 }
@@ -355,7 +399,7 @@ function MapToolButtons({
   hasSelection: boolean;
 }) {
   return (
-    <div className="absolute top-16 left-4 z-[400] flex flex-col gap-2">
+    <div className="absolute top-16 left-4 z-20 flex flex-col gap-2">
       <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 overflow-hidden flex flex-col">
         <button
           onClick={onZoomIn}
@@ -429,6 +473,10 @@ export default function MapView({
   orthoOpacity = 90,
   baseCenter = DEFAULT_CENTER,
   baseZoom = DEFAULT_ZOOM,
+  initialCenter,
+  initialZoom,
+  focusParcelId = null,
+  onClearFocusParcel,
   compareMode = false,
   compareSlider = 50,
   basemapMode = 'satellite',
@@ -449,20 +497,37 @@ export default function MapView({
   elevationMode = 'off',
   onElevationModeChange,
   onViewChange,
+  basemapOpacity = 100,
+  onBasemapOpacityChange,
 }: MapViewProps) {
   const [coords, setCoords] = useState<{ lat: number; lng: number; zoom: number }>({
-    lat: baseCenter[0],
-    lng: baseCenter[1],
-    zoom: baseZoom,
+    lat: initialCenter ? initialCenter[0] : baseCenter[0],
+    lng: initialCenter ? initialCenter[1] : baseCenter[1],
+    zoom: initialZoom || baseZoom,
   });
   const [fitTrigger, setFitTrigger] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  const [elevationSlider, setElevationSlider] = useState(100);
-  const [showRasterPanel, setShowRasterPanel] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
   const [showBasemapDropdown, setShowBasemapDropdown] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
+  const isDraggingRef = useRef(false);
+  const lastDragEndRef = useRef(0);
+
+  // Pure parcel selection click handler separated strictly from map dragging
+  const handleParcelClick = (e: L.LeafletMouseEvent, parcelId: string | null) => {
+    L.DomEvent.stopPropagation(e);
+    if (e.originalEvent) {
+      e.originalEvent.stopPropagation();
+    }
+    // If a map drag was just performed within 200ms, ignore this click
+    if (isDraggingRef.current || Date.now() - lastDragEndRef.current < 200) {
+      return;
+    }
+    if (parcelId) {
+      onSelectParcel(parcelId);
+    }
+  };
 
   // Dynamic CSS Filter for Raster Orthomosaic & Basemap Tiles
   const filterCss = useMemo(() => {
@@ -587,31 +652,46 @@ export default function MapView({
     }
 
     const localPoints = markPoints.map(pt => latLngToLocal(pt[0], pt[1], baseCenter[0], baseCenter[1]));
-    const nextSuffix = String(Math.floor(Math.random() * 800) + 200).padStart(6, '0');
-    const newId = `TN-CHN-W42-${nextSuffix}`;
+    
+    // Deterministic Shoelace polygon area calculation in real metric units
+    let shoeArea = 0;
+    let perim = 0;
+    for (let i = 0, j = localPoints.length - 1; i < localPoints.length; j = i++) {
+      shoeArea += (localPoints[j].x + localPoints[i].x) * (localPoints[j].y - localPoints[i].y);
+      perim += Math.hypot(localPoints[i].x - localPoints[j].x, localPoints[i].y - localPoints[j].y);
+    }
+    const realArea = Math.round(Math.abs(shoeArea / 2) * 10) / 10;
+    const realPerim = Math.round(perim * 10) / 10;
+
+    const userSurveyNum = window.prompt(
+      'Enter Survey Lot Number for this digitized parcel (or keep temporary identifier):',
+      `LOT-DIG-${Date.now().toString().slice(-4)}`
+    );
+    const surveyNumber = userSurveyNum?.trim() || `TEMP-${Date.now().toString().slice(-6)}`;
+    const newId = `MANUAL-PARCEL-${Date.now().toString().slice(-8)}`;
 
     const newParcel: Parcel = {
       id: newId,
-      surveyNumber: `${Math.floor(Math.random() * 200) + 100}/1`,
+      surveyNumber,
       ward: 'Ward 42',
       zone: 'Zone 05',
       existingGeometry: localPoints,
       aiGeometry: localPoints,
-      existingArea: 165.5,
-      aiArea: 165.5,
-      confidence: 96.8,
-      boundaryConfidence: 97.5,
-      buildingConfidence: 95.0,
-      perimeter: 52.4,
-      boundaryDisplacement: 0.2,
-      status: 'ai_preliminary',
+      existingArea: realArea,
+      aiArea: realArea,
+      confidence: 100, // Manually delineated by surveyor
+      boundaryConfidence: 100,
+      buildingConfidence: 0,
+      perimeter: realPerim,
+      boundaryDisplacement: 0.0,
+      status: 'requires_review',
       conflictType: null,
       priority: 'LOW',
       topologyStatus: 'valid',
       verificationStatus: 'not_reviewed',
       topologyIssues: [],
-      notes: 'User-marked parcel on map',
-      recommendation: 'Newly digitized parcel boundary ready for verification.',
+      notes: 'Surveyor-digitized boundary awaiting field review',
+      recommendation: 'Manual digitization complete. Proceed with topology check and surveyor approval.',
       conflictReasons: [],
       assignedSurveyor: null,
       checklist: {
@@ -675,7 +755,7 @@ export default function MapView({
 
       {/* Active Mode Banner: Mark Parcel Mode */}
       {isMarkingParcel && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-[400] bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl border border-magenta-500/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl border border-magenta-500/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-magenta-400 animate-ping" />
             <span className="text-xs font-bold">Marking Parcel ({markPoints.length} points)</span>
@@ -701,7 +781,7 @@ export default function MapView({
 
       {/* Active Mode Banner: Edit Bounding Mode */}
       {isEditingBounding && selectedParcel && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-[400] bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl border border-cyan-500/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl border border-cyan-500/50 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
             <span className="text-xs font-bold font-mono">Editing {selectedParcel.id} Nodes</span>
@@ -738,140 +818,9 @@ export default function MapView({
         hasSelection={!!selectedParcel}
       />
 
-      {/* Top Right Controls Container */}
-      <div className="absolute top-3.5 right-4 z-[400] flex items-start gap-2">
-        {/* Raster Image Adjustments Popover Toggle */}
-        <div className="relative">
-          <button
-            onClick={() => setShowRasterPanel(!showRasterPanel)}
-            className={`w-8 h-8 rounded-xl backdrop-blur-md shadow-lg border flex items-center justify-center transition-all ${
-              showRasterPanel
-                ? 'bg-blue-600 text-white border-blue-500 ring-2 ring-blue-400/50'
-                : 'bg-white/95 text-slate-700 border-slate-200/80 hover:bg-slate-100'
-            }`}
-            title="Imagery Raster Adjustments (Brightness, Contrast, Saturation)"
-          >
-            <Sun className="w-4 h-4" />
-          </button>
-
-          {/* Raster Adjustments Glass Panel */}
-          {showRasterPanel && (
-            <div className="absolute top-full mt-2 right-0 w-64 bg-slate-900/95 text-white backdrop-blur-xl border border-slate-700/80 p-3.5 rounded-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                  <Sliders className="w-3.5 h-3.5 text-blue-400" /> Imagery Adjustments
-                </span>
-                <button
-                  onClick={() => {
-                    onRasterAdjustmentsChange?.({
-                      brightness: 100,
-                      contrast: 100,
-                      saturation: 100,
-                      sharpen: false,
-                    });
-                  }}
-                  className="text-[10px] text-slate-400 hover:text-white"
-                >
-                  Reset
-                </button>
-              </div>
-
-              {/* Brightness */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-slate-300">
-                  <span>Brightness</span>
-                  <span className="font-mono text-blue-400">{rasterAdjustments?.brightness ?? 100}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={50}
-                  max={150}
-                  value={rasterAdjustments?.brightness ?? 100}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    onRasterAdjustmentsChange?.(prev => ({ ...prev, brightness: val }));
-                  }}
-                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                />
-              </div>
-
-              {/* Contrast */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-slate-300">
-                  <span>Contrast</span>
-                  <span className="font-mono text-blue-400">{rasterAdjustments?.contrast ?? 100}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={50}
-                  max={150}
-                  value={rasterAdjustments?.contrast ?? 100}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    onRasterAdjustmentsChange?.(prev => ({ ...prev, contrast: val }));
-                  }}
-                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                />
-              </div>
-
-              {/* Saturation */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-slate-300">
-                  <span>Saturation</span>
-                  <span className="font-mono text-blue-400">{rasterAdjustments?.saturation ?? 100}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={200}
-                  value={rasterAdjustments?.saturation ?? 100}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    onRasterAdjustmentsChange?.(prev => ({ ...prev, saturation: val }));
-                  }}
-                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                />
-              </div>
-
-              {/* Sharpen Toggle */}
-              <div className="flex items-center justify-between pt-1 border-t border-slate-800">
-                <span className="text-[11px] text-slate-300">Sharpen Aerial Details</span>
-                <button
-                  onClick={() => {
-                    onRasterAdjustmentsChange?.(prev => ({ ...prev, sharpen: !prev.sharpen }));
-                  }}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                    rasterAdjustments?.sharpen ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {rasterAdjustments?.sharpen ? 'ON' : 'OFF'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right Vertical Opacity Slider Widget */}
-        <div className="bg-white/95 backdrop-blur-md rounded-xl p-2 shadow-lg border border-slate-200/80 flex flex-col items-center gap-1.5">
-          <Sliders className="w-3.5 h-3.5 text-slate-600" />
-          <div className="h-28 flex items-center justify-center py-1">
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={elevationSlider}
-              onChange={(e) => setElevationSlider(Number(e.target.value))}
-              className="h-24 w-1.5 accent-blue-600 cursor-pointer [writing-mode:bt-lr] [-webkit-appearance:slider-vertical]"
-              title="Layer Depth / Imagery Opacity"
-            />
-          </div>
-          <span className="text-[9px] font-bold text-slate-500 font-mono">{elevationSlider}%</span>
-        </div>
-      </div>
-
       {/* Analytical Heatmap Legend (when heatmapMode is active) */}
       {heatmapMode && (
-        <div className="absolute top-16 left-16 z-[400] bg-slate-900/90 text-white backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl shadow-xl space-y-1.5 animate-in fade-in">
+        <div className="absolute top-16 left-16 z-20 bg-slate-900/90 text-white backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl shadow-xl space-y-1.5 animate-in fade-in">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
             <Activity className="w-3 h-3 text-amber-400" />
             <span>Boundary Displacement</span>
@@ -899,7 +848,7 @@ export default function MapView({
 
       {/* Difference View Mode Legend (when diffMode is active) */}
       {diffMode && !heatmapMode && (
-        <div className="absolute top-16 left-16 z-[400] bg-slate-900/90 text-white backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl shadow-xl space-y-1 animate-in fade-in">
+        <div className="absolute top-16 left-16 z-20 bg-slate-900/90 text-white backdrop-blur-md border border-slate-700/80 px-3 py-2 rounded-xl shadow-xl space-y-1 animate-in fade-in">
           <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
             <Activity className="w-3 h-3 text-blue-400" />
             <span>AI Review: Difference View</span>
@@ -925,32 +874,44 @@ export default function MapView({
         </div>
       )}
 
+      {/* Bottom Center Zone: Basemap Selector + Scale & Attribution Badge */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 pointer-events-auto select-none">
+        {/* Floating Basemap Selector */}
+        <div className="flex items-center bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-lg border border-slate-200/80">
+          {BASEMAP_OPTIONS.map(opt => {
+            const isActive = (basemapType || (basemapMode === 'satellite' ? 'satellite' : 'streets')) === opt.id;
+            return (
+              <button
+                key={opt.id}
+                onClick={() => onBasemapChange?.(opt.id)}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+                title={`Switch Basemap to ${opt.label}`}
+              >
+                <span className={`w-2 h-2 rounded-full ${opt.previewColor}`} />
+                <span>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
 
-
-      {/* Floating Basemap Thumbnail Switcher (Bottom Right) */}
-      <div className="absolute bottom-6 right-16 z-[400] flex items-center bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-lg border border-slate-200/80 pointer-events-auto">
-        {BASEMAP_OPTIONS.map(opt => {
-          const isActive = (basemapType || (basemapMode === 'satellite' ? 'satellite' : 'streets')) === opt.id;
-          return (
-            <button
-              key={opt.id}
-              onClick={() => onBasemapChange?.(opt.id)}
-              className={`px-2 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                isActive
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-              title={`Switch Basemap to ${opt.label}`}
-            >
-              <span className={`w-2 h-2 rounded-full ${opt.previewColor}`} />
-              <span>{opt.label}</span>
-            </button>
-          );
-        })}
+        {/* Attribution & Scale Badge */}
+        <div className="bg-white/90 backdrop-blur-md px-3 py-0.5 rounded-full text-[10px] text-slate-600 shadow-sm border border-slate-200/60 flex items-center gap-2">
+          <span className="font-semibold">Google</span>
+          <span className="text-slate-300">|</span>
+          <span className="hidden sm:inline">Imagery Map Data ©2025 Google</span>
+          <span className="hidden sm:inline text-slate-300">|</span>
+          <span className="font-mono text-slate-700 font-semibold">Scale: 1:2,500</span>
+          <span className="text-slate-300">|</span>
+          <span className="text-slate-500 font-mono">Zoom: {coords.zoom.toFixed(1)}</span>
+        </div>
       </div>
 
-      {/* Bottom Right GIS & Fullscreen Buttons */}
-      <div className="absolute bottom-6 right-4 z-[400] flex flex-col gap-2">
+      {/* Bottom Right Zone: GIS & Fullscreen Buttons */}
+      <div className="absolute bottom-3 right-4 z-20 flex flex-col gap-2">
         <div className="bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200/80 overflow-hidden flex flex-col">
           <button
             onClick={() => {
@@ -975,19 +936,31 @@ export default function MapView({
         </div>
       </div>
 
-      {/* Scoped CSS for Dynamic Raster Filtering */}
+      {/* Scoped CSS for Dynamic Raster Filtering and Leaflet Popups */}
       <style>{`
         .cadastra-map-wrapper .leaflet-tile-pane,
         .cadastra-map-wrapper .leaflet-image-layer {
           filter: ${filterCss};
+        }
+        .cadastra-map-wrapper .leaflet-popup-content-wrapper {
+          border-radius: 12px;
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+          padding: 0;
+          overflow: hidden;
+        }
+        .cadastra-map-wrapper .leaflet-popup-content {
+          margin: 0;
+          max-width: 270px;
+          max-height: 250px;
+          overflow-y: auto;
         }
       `}</style>
 
       {/* Main Leaflet Map Engine */}
       <div className="cadastra-map-wrapper w-full h-full">
         <MapContainer
-          center={baseCenter}
-          zoom={DEFAULT_ZOOM}
+          center={initialCenter || baseCenter}
+          zoom={initialZoom || DEFAULT_ZOOM}
           zoomSnap={0.5}
           minZoom={14}
           maxZoom={20}
@@ -999,13 +972,14 @@ export default function MapView({
           {/* Basemap Tile Layer */}
           {(() => {
             const effective = basemapType || (basemapMode === 'satellite' ? 'satellite' : 'streets');
+            const layerOpacity = (basemapOpacity ?? 100) / 100;
             if (effective === 'streets') {
               return (
                 <TileLayer
                   key="osm-streets"
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   maxZoom={19}
-                  opacity={elevationSlider / 100}
+                  opacity={layerOpacity}
                 />
               );
             }
@@ -1015,7 +989,7 @@ export default function MapView({
                   key="google-terrain"
                   url="https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}"
                   maxZoom={18}
-                  opacity={elevationSlider / 100}
+                  opacity={layerOpacity}
                 />
               );
             }
@@ -1025,7 +999,7 @@ export default function MapView({
                   key="carto-dark"
                   url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                   maxZoom={19}
-                  opacity={elevationSlider / 100}
+                  opacity={layerOpacity}
                 />
               );
             }
@@ -1035,7 +1009,7 @@ export default function MapView({
                 key="google-satellite"
                 url="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
                 maxZoom={20}
-                opacity={elevationSlider / 100}
+                opacity={layerOpacity}
               />
             );
           })()}
@@ -1053,11 +1027,17 @@ export default function MapView({
           {/* Map Controller */}
           <MapController
             searchParcelId={searchParcelId}
+            focusParcelId={focusParcelId}
+            onClearFocusParcel={onClearFocusParcel}
             parcels={parcels}
             baseCenter={baseCenter}
+            initialCenter={initialCenter}
+            initialZoom={initialZoom}
             onCursorMove={setCoords}
             fitTrigger={fitTrigger}
             onViewChange={onViewChange}
+            isDraggingRef={isDraggingRef}
+            lastDragEndRef={lastDragEndRef}
           />
 
           {/* Survey AOI Extent Boundary Outline */}
@@ -1105,7 +1085,7 @@ export default function MapView({
                   fillOpacity: 0.16,
                 }}
                 eventHandlers={{
-                  click: () => onSelectParcel(p.id),
+                  click: (e) => handleParcelClick(e, p.id),
                 }}
               />
             );
@@ -1127,7 +1107,7 @@ export default function MapView({
                   fillOpacity: 0.22, // Discrepancy area translucent red
                 }}
                 eventHandlers={{
-                  click: () => onSelectParcel(p.id),
+                  click: (e) => handleParcelClick(e, p.id),
                 }}
               />
             );
@@ -1157,10 +1137,10 @@ export default function MapView({
                 positions={positions}
                 pathOptions={pathOptions}
                 eventHandlers={{
-                  click: () => onSelectParcel(p.id),
+                  click: (e) => handleParcelClick(e, p.id),
                 }}
               >
-                <Popup className="cadastra-popup">
+                <Popup className="cadastra-popup" autoPan={false}>
                   <div className="p-2 space-y-1 text-xs">
                     <div className="flex items-center gap-1 font-bold text-amber-700">
                       <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
@@ -1175,7 +1155,11 @@ export default function MapView({
                     </div>
                     <div className="flex gap-1 pt-1.5 border-t border-slate-100">
                       <button
-                        onClick={() => onSelectParcel(p.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onSelectParcel(p.id);
+                        }}
                         className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-semibold flex-1 cursor-pointer"
                       >
                         Select
@@ -1230,10 +1214,10 @@ export default function MapView({
                 positions={positions}
                 pathOptions={pathOptions}
                 eventHandlers={{
-                  click: () => onSelectParcel(p.id),
+                  click: (e) => handleParcelClick(e, p.id),
                 }}
               >
-                <Popup className="cadastra-popup">
+                <Popup className="cadastra-popup" autoPan={false}>
                   <div className="p-2 space-y-1 text-xs">
                     <div className="flex items-center gap-1 font-bold text-blue-700">
                       <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
@@ -1248,14 +1232,22 @@ export default function MapView({
                     </div>
                     <div className="flex gap-1 pt-1.5 border-t border-slate-100">
                       <button
-                        onClick={() => onSelectParcel(p.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onSelectParcel(p.id);
+                        }}
                         className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-semibold flex-1 cursor-pointer"
                       >
                         Select
                       </button>
                       {onAcceptParcel && (
                         <button
-                          onClick={() => onAcceptParcel(p.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            onAcceptParcel(p.id);
+                          }}
                           className="px-2 py-1 bg-emerald-600 text-white rounded text-[10px] font-semibold cursor-pointer"
                         >
                           Approve
@@ -1330,8 +1322,8 @@ export default function MapView({
                 positions={positions}
                 pathOptions={get2DBuildingStyle(isSelected)}
                 eventHandlers={{
-                  click: () => {
-                    if (b.parcelId) onSelectParcel(b.parcelId);
+                  click: (e) => {
+                    if (b.parcelId) handleParcelClick(e, b.parcelId);
                   },
                 }}
               />
@@ -1367,7 +1359,7 @@ export default function MapView({
                   fillOpacity: 0.38,
                 }}
                 eventHandlers={{
-                  click: () => onSelectParcel(p.id),
+                  click: (e) => handleParcelClick(e, p.id),
                 }}
               />
             );
@@ -1390,15 +1382,15 @@ export default function MapView({
             // Calculate precise measurement for tooltip
             let measurementStr = '';
             if (cType === 'overlap') {
-              measurementStr = `Overlap Area: ${(p.overlapArea || (p.aiArea * 0.082)).toFixed(1)} m²`;
+              measurementStr = p.overlapArea != null ? `Overlap Area: ${p.overlapArea.toFixed(1)} m²` : 'Overlap Area: Not evaluated';
             } else if (cType === 'building_encroachment') {
-              measurementStr = `Encroachment: ${(p.encroachmentDistance || 1.8).toFixed(1)} m over parcel line`;
+              measurementStr = p.encroachmentDistance != null ? `Encroachment: ${p.encroachmentDistance.toFixed(1)} m over parcel line` : 'Encroachment: Not evaluated';
             } else if (cType === 'gap') {
-              measurementStr = `Gap Width: ${(p.gapDistance || 0.65).toFixed(2)} m sliver`;
+              measurementStr = p.gapDistance != null ? `Gap Width: ${p.gapDistance.toFixed(2)} m sliver` : 'Gap Width: Not evaluated';
             } else if (cType === 'boundary_displacement') {
-              measurementStr = `Boundary Displacement: ${p.boundaryDisplacement} m deviation`;
+              measurementStr = p.boundaryDisplacement != null ? `Boundary Displacement: ${p.boundaryDisplacement} m deviation` : 'Boundary Displacement: Not evaluated';
             } else {
-              measurementStr = `Displacement: ${p.boundaryDisplacement || 0.35} m`;
+              measurementStr = p.boundaryDisplacement != null ? `Displacement: ${p.boundaryDisplacement} m` : 'Displacement: Not evaluated';
             }
 
             return (
@@ -1407,10 +1399,10 @@ export default function MapView({
                 position={pos}
                 icon={createConflictIcon(cType)}
                 eventHandlers={{
-                  click: () => onSelectParcel(p.id),
+                  click: (e) => handleParcelClick(e, p.id),
                 }}
               >
-                <Popup className="cadastra-popup">
+                <Popup className="cadastra-popup" autoPan={false}>
                   <div className="p-2.5 space-y-2 min-w-[220px] text-xs">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${meta.badgeColor}`}>
@@ -1438,14 +1430,22 @@ export default function MapView({
 
                     <div className="flex gap-1.5 pt-1">
                       <button
-                        onClick={() => onSelectParcel(p.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onSelectParcel(p.id);
+                        }}
                         className="flex-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors shadow-xs"
                       >
                         Inspect Conflict
                       </button>
                       {onAcceptParcel && (
                         <button
-                          onClick={() => onAcceptParcel(p.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            onAcceptParcel(p.id);
+                          }}
                           className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors shadow-xs"
                         >
                           Approve
@@ -1476,7 +1476,9 @@ export default function MapView({
                   weight: 1.5,
                 }}
                 eventHandlers={{
-                  click: () => onSelectParcel(pt.parcelId),
+                  click: (e) => {
+                    if (pt.parcelId) handleParcelClick(e, pt.parcelId);
+                  },
                 }}
               />
             );
@@ -1489,17 +1491,6 @@ export default function MapView({
             onAddPoint={pt => setMarkPoints(prev => [...prev, pt])}
           />
         </MapContainer>
-      </div>
-
-      {/* Bottom Center Google/Map Attribution & Scale Bar */}
-      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[400] bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] text-slate-600 shadow-sm border border-slate-200/60 flex items-center gap-3">
-        <span className="font-semibold">Google</span>
-        <span className="text-slate-300">|</span>
-        <span>Imagery Map Data ©2025 Google</span>
-        <span className="text-slate-300">|</span>
-        <span className="font-mono text-slate-700 font-semibold">Scale: 1:2,500</span>
-        <span className="text-slate-300">|</span>
-        <span className="text-slate-500 font-mono">Zoom: {coords.zoom.toFixed(1)}</span>
       </div>
     </div>
   );

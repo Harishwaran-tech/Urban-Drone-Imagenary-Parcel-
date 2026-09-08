@@ -16,10 +16,10 @@ router = APIRouter(prefix="/api/survey", tags=["Survey"])
 @router.post("/upload")
 async def upload_survey_imagery(
     file: UploadFile = File(...),
-    name: Optional[str] = Form("Jaipur Urban Survey"),
-    survey_area: Optional[str] = Form("Zone 04"),
-    district: Optional[str] = Form("Jaipur"),
-    state: Optional[str] = Form("Rajasthan"),
+    name: Optional[str] = Form(None),
+    survey_area: Optional[str] = Form(None),
+    district: Optional[str] = Form(None),
+    state: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -28,8 +28,8 @@ async def upload_survey_imagery(
     """
     # Validate extension
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".geojson", ".kml", ".zip"]:
-        raise HTTPException(status_code=400, detail=f"Unsupported file format: {ext}")
+    if ext not in [".tif", ".tiff", ".jpg", ".jpeg", ".png"]:
+        raise HTTPException(400, "Unsupported file format. Provide GeoTIFF, JPEG, or PNG.")
 
     contents = await file.read()
     if len(contents) == 0:
@@ -38,10 +38,10 @@ async def upload_survey_imagery(
     # Create survey in DB
     survey = create_survey(
         {
-            "name": name,
-            "survey_area": survey_area,
-            "district": district,
-            "state": state,
+            "name": name or "Cadastral Survey Project",
+            "survey_area": survey_area or "Survey Area",
+            "district": district or "Unassigned",
+            "state": state or "Unassigned",
         },
         db=db,
     )
@@ -65,21 +65,14 @@ async def analyze_survey_imagery(
     Executes the End-to-End Deep Learning + GIS feature extraction pipeline:
     Image => Preprocessing => PyTorch U-Net => Vectorization => GeoJSON => Cadastral Comparison => Conflict Analysis.
     """
-    if file:
-        contents = await file.read()
-        filename = file.filename
-    else:
-        # Generate synthetic raster or test imagery if none uploaded
-        import numpy as np
-        import cv2
-        dummy_img = np.random.randint(40, 220, (800, 800, 3), dtype=np.uint8)
-        # Draw some building-like boxes
-        for bx, by, bw, bh in [(100, 100, 150, 120), (350, 120, 180, 140), (120, 400, 200, 180), (450, 420, 160, 150)]:
-            cv2.rectangle(dummy_img, (bx, by), (bx + bw, by + bh), (220, 220, 230), -1)
-            cv2.rectangle(dummy_img, (bx, by), (bx + bw, by + bh), (30, 30, 30), 2)
-        _, encoded = cv2.imencode(".png", dummy_img)
-        contents = encoded.tobytes()
-        filename = "drone_survey_sample.png"
+    if not file:
+        raise HTTPException(
+            status_code=400,
+            detail="Required ORI (orthomosaic) raster is missing. Please upload a valid GeoTIFF/image file.",
+        )
+
+    contents = await file.read()
+    filename = file.filename
 
     result = process_survey_pipeline(
         image_bytes=contents,
